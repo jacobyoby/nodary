@@ -40,15 +40,17 @@ def create_app(conn: sqlite3.Connection) -> Flask:
         tier = request.args.get("tier")
         where, params = "", []
         if tier is not None:
-            where = "AND sc.trust_tier_at_scoring = ?"
+            where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
             params.append(int(tier))
         rows = conn.execute(
             f"""SELECT m.id, m.from_email_norm, m.from_display_name, m.sent_at,
                   m.n_attachments, m.n_links, m.size_bytes,
-                  sc.anomaly_score, sc.trust_tier_at_scoring AS tier,
-                  sc.baseline_n, sc.engine_version
+                  sc.anomaly_score,
+                  COALESCE(p.trust_tier, sc.trust_tier_at_scoring) AS tier,
+                  sc.trust_tier_at_scoring, sc.baseline_n, sc.engine_version
                 FROM messages m
                 JOIN message_scores sc ON sc.message_id = m.id
+                LEFT JOIN sender_profiles p ON p.sender_id = m.sender_id
                 WHERE m.direction = 'in' {where}
                 ORDER BY sc.anomaly_score DESC, m.sent_at DESC
                 LIMIT ?""",

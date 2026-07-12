@@ -43,6 +43,14 @@ def _clamp(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
+def _fmt_size(n_bytes: int) -> str:
+    if n_bytes >= 1024 * 1024:
+        return f"{n_bytes / (1024 * 1024):.1f} MB"
+    if n_bytes >= 1024:
+        return f"{n_bytes / 1024:.1f} KB"
+    return f"{n_bytes} B"
+
+
 def _fire(results: list[FeatureResult], name: str, raw: float, expl: str) -> None:
     raw = _clamp(raw)
     if raw > 0.0:
@@ -262,8 +270,8 @@ def _behavioral_features(
             out,
             "size_anomaly",
             raw,
-            f"{record.size_bytes // 1024} KB message; sender's typical is "
-            f"{int(math.exp(snap.log_size_mean)) // 1024} KB",
+            f"{_fmt_size(record.size_bytes)} message; sender's typical is "
+            f"{_fmt_size(int(math.exp(snap.log_size_mean)))}",
         )
 
     # dormant_resurrection — only alongside other flags

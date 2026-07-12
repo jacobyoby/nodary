@@ -53,12 +53,15 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
         with contextlib.suppress(OSError):
             os.chmod(path.parent, 0o700)
 
+    # check_same_thread=False: the UI serves reads from Flask worker threads.
+    # CPython's sqlite3 is built with SQLITE_THREADSAFE (serialized), so a
+    # shared connection is safe.
     if HAVE_SQLCIPHER and key:
-        conn = sqlcipher3.connect(str(path))
+        conn = sqlcipher3.connect(str(path), check_same_thread=False)
         conn.execute(f"PRAGMA key = \"x'{key}'\"")
         encryption = "sqlcipher"
     else:
-        conn = sqlite3.connect(str(path))
+        conn = sqlite3.connect(str(path), check_same_thread=False)
         encryption = "none"
         if key and not HAVE_SQLCIPHER:
             print(
