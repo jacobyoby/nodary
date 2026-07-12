@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+uv.lock
+
+# never commit a mailbox database or key material
+*.db
+*.db-wal
+*.db-shm
+.nodary/

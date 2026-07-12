@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nodary — local inbox analysis</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #101418; --panel: #181e24; --line: #262e37; --text: #d7dde3;
+    --dim: #8a949e; --t0: #b0713a; --t1: #a08a3c; --t2: #4d8a6a; --t3: #4a7fb5;
+    --hot: #c25450;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 ui-monospace, "SF Mono", Menlo, monospace; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line);
+           display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .06em; }
+  header .stat { color: var(--dim); font-size: 12px; }
+  #warn { color: var(--hot); font-size: 12px; }
+  .filters { padding: 10px 20px; display: flex; gap: 8px; }
+  .filters button { background: var(--panel); color: var(--dim);
+    border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px;
+    font: inherit; font-size: 12px; cursor: pointer; }
+  .filters button.on { color: var(--text); border-color: var(--dim); }
+  main { padding: 0 20px 40px; max-width: 1100px; }
+  .msg { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0;
+         background: var(--panel); overflow: hidden; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 8px 12px;
+         cursor: pointer; }
+  .score { min-width: 46px; text-align: right; font-weight: 700; }
+  .score.hi { color: var(--hot); }
+  .score.mid { color: var(--t0); }
+  .score.lo { color: var(--dim); }
+  .tier { font-size: 11px; padding: 1px 7px; border-radius: 10px;
+          border: 1px solid; white-space: nowrap; }
+  .tier.t0 { color: var(--t0); border-color: var(--t0); }
+  .tier.t1 { color: var(--t1); border-color: var(--t1); }
+  .tier.t2 { color: var(--t2); border-color: var(--t2); }
+  .tier.t3 { color: var(--t3); border-color: var(--t3); }
+  .who { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who .name { color: var(--text); }
+  .who .addr { color: var(--dim); }
+  .meta { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  .flags { border-top: 1px solid var(--line); padding: 8px 12px 10px 70px;
+           display: none; }
+  .msg.open .flags { display: block; }
+  .flag { margin: 4px 0; font-size: 13px; }
+  .flag .pts { display: inline-block; min-width: 52px; color: var(--hot); }
+  .flag .why { color: var(--text); }
+  .flag .fname { color: var(--dim); font-size: 11px; margin-left: 6px; }
+  .clean { color: var(--dim); font-size: 12px; }
+  .empty { color: var(--dim); padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>nodary</h1>
+  <span class="stat" id="stats">loading…</span>
+  <span id="warn"></span>
+</header>
+<div class="filters" id="filters">
+  <button data-tier="" class="on">all</button>
+  <button data-tier="3">tier 3 · two-way</button>
+  <button data-tier="2">tier 2 · one-way</button>
+  <button data-tier="1">tier 1 · org known</button>
+  <button data-tier="0">tier 0 · never seen</button>
+</div>
+<main id="list"></main>
+<script>
+const fmtDate = ts => new Date(ts * 1000).toISOString().slice(0, 16).replace("T", " ");
+const esc = s => (s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function loadStatus() {
+  const s = await (await fetch("/api/status")).json();
+  document.getElementById("stats").textContent =
+    `${s.incoming} incoming · ${s.senders} senders · ${s.messages} messages`;
+  if (s.encryption !== "sqlcipher")
+    document.getElementById("warn").textContent = "⚠ database not encrypted (sqlcipher not installed)";
+}
+
+async function loadMessages(tier) {
+  const q = tier === "" ? "" : `&tier=${tier}`;
+  const msgs = await (await fetch(`/api/messages?limit=300${q}`)).json();
+  const list = document.getElementById("list");
+  if (!msgs.length) { list.innerHTML = '<div class="empty">no scored messages — run `nodary sync`</div>'; return; }
+  list.innerHTML = msgs.map(m => {
+    const cls = m.anomaly_score >= 30 ? "hi" : m.anomaly_score >= 10 ? "mid" : "lo";
+    const flags = m.features.length
+      ? m.features.map(f =>
+          `<div class="flag"><span class="pts">+${f.contribution.toFixed(1)}</span>` +
+          `<span class="why">${esc(f.explanation)}</span>` +
+          `<span class="fname">${esc(f.feature)} (${f.raw_value}×${f.weight})</span></div>`).join("")
+      : `<div class="clean">no anomalies vs this sender's baseline (${m.baseline_n} msgs)</div>`;
+    return `<div class="msg"><div class="row" onclick="this.parentNode.classList.toggle('open')">` +
+      `<span class="score ${cls}">${m.anomaly_score.toFixed(0)}</span>` +
+      `<span class="tier t${m.tier}">T${m.tier} ${esc(m.tier_label)}</span>` +
+      `<span class="who"><span class="name">${esc(m.from_display_name || "")}</span> ` +
+      `<span class="addr">&lt;${esc(m.from_email_norm)}&gt;</span></span>` +
+      `<span class="meta">${m.n_attachments ? "📎" + m.n_attachments + " " : ""}` +
+      `${m.n_links ? "🔗" + m.n_links + " " : ""}${fmtDate(m.sent_at)}</span>` +
+      `</div><div class="flags">${flags}</div></div>`;
+  }).join("");
+}
+
+let tier = "";
+document.getElementById("filters").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON") return;
+  document.querySelectorAll(".filters button").forEach(b => b.classList.remove("on"));
+  e.target.classList.add("on");
+  tier = e.target.dataset.tier;
+  loadMessages(tier);
+});
+loadStatus();
+loadMessages("");
+</script>
+</body>
+</html>
