@@ -50,6 +50,10 @@
   .flag .why { color: var(--text); }
   .flag .fname { color: var(--dim); font-size: 11px; margin-left: 6px; }
   .clean { color: var(--dim); font-size: 12px; }
+  .openmail { display: inline-block; margin-top: 8px; font-size: 12px;
+              color: var(--t3); text-decoration: none; border: 1px solid var(--line);
+              border-radius: 4px; padding: 2px 8px; }
+  .openmail:hover { border-color: var(--t3); }
   .empty { color: var(--dim); padding: 40px 0; text-align: center; }
 </style>
 </head>
@@ -92,6 +96,12 @@ async function loadMessages(tier) {
           `<span class="why">${esc(f.explanation)}</span>` +
           `<span class="fname">${esc(f.feature)} (${f.raw_value}×${f.weight})</span></div>`).join("")
       : `<div class="clean">no anomalies vs this sender's baseline (${m.baseline_n} msgs)</div>`;
+    // nodary stores no message content; view the mail itself in your client.
+    // Apple Mail (macOS) resolves message://<Message-ID> via Spotlight.
+    const open = m.message_id
+      ? `<a class="openmail" href="message://${encodeURIComponent(m.message_id)}"` +
+        ` onclick="event.stopPropagation()">open in Apple Mail ↗</a>`
+      : "";
     return `<div class="msg"><div class="row" onclick="this.parentNode.classList.toggle('open')">` +
       `<span class="score ${cls}">${m.anomaly_score.toFixed(0)}</span>` +
       `<span class="tier t${m.tier}">T${m.tier} ${esc(m.tier_label)}</span>` +
@@ -99,7 +109,7 @@ async function loadMessages(tier) {
       `<span class="addr">&lt;${esc(m.from_email_norm)}&gt;</span></span>` +
       `<span class="meta">${m.n_attachments ? "📎" + m.n_attachments + " " : ""}` +
       `${m.n_links ? "🔗" + m.n_links + " " : ""}${fmtDate(m.sent_at)}</span>` +
-      `</div><div class="flags">${flags}</div></div>`;
+      `</div><div class="flags">${flags}${open}</div></div>`;
   }).join("");
 }
 

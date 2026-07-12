@@ -43,7 +43,8 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
             params.append(int(tier))
         rows = conn.execute(
-            f"""SELECT m.id, m.from_email_norm, m.from_display_name, m.sent_at,
+            f"""SELECT m.id, m.message_id, m.from_email_norm,
+                  m.from_display_name, m.sent_at,
                   m.n_attachments, m.n_links, m.size_bytes,
                   sc.anomaly_score,
                   COALESCE(p.trust_tier, sc.trust_tier_at_scoring) AS tier,
