@@ -1,9 +1,12 @@
 """Local dashboard. Binds 127.0.0.1 only; serves no external assets and makes
-no outbound requests — the page is a single self-contained HTML document."""
+no outbound requests — the page is a single self-contained HTML document.
+Served over TLS with a locally-trusted mkcert certificate when available
+(see tls.py); otherwise plain HTTP with a warning."""
 
 from __future__ import annotations
 
 import sqlite3
+import sys
 
 from flask import Flask, jsonify, render_template, request
 
@@ -91,7 +94,24 @@ def create_app(conn: sqlite3.Connection) -> Flask:
     return app
 
 
-def run(conn: sqlite3.Connection, port: int = 8321) -> None:
+def run(conn: sqlite3.Connection, port: int = 8321, tls: bool = True) -> None:
+    from .tls import ensure_certificate
+
     app = create_app(conn)
-    print(f"nodary dashboard: http://127.0.0.1:{port}/  (local only)")
-    app.run(host="127.0.0.1", port=port, debug=False)
+    context = None
+    if tls:
+        pair = ensure_certificate()
+        if pair:
+            context = (str(pair[0]), str(pair[1]))
+    scheme = "https" if context else "http"
+    print(f"nodary dashboard: {scheme}://127.0.0.1:{port}/  (local only)")
+    if tls and context is None:
+        print(
+            "warning: serving plain HTTP — no local certificate found and\n"
+            "  mkcert is not installed. For TLS: brew install mkcert &&"
+            " mkcert -install\n"
+            "  then restart the dashboard (certificate generation is fully"
+            " local).",
+            file=sys.stderr,
+        )
+    app.run(host="127.0.0.1", port=port, debug=False, ssl_context=context)

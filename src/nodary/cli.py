@@ -107,7 +107,7 @@ def cmd_rebuild(args) -> int:
 def cmd_ui(args) -> int:
     from .ui import run
 
-    run(_open(), port=args.port)
+    run(_open(), port=args.port, tls=not args.no_tls)
     return 0
 
 
@@ -141,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
 
     u = sub.add_parser("ui", help="serve the local dashboard (127.0.0.1)")
     u.add_argument("--port", type=int, default=8321)
+    u.add_argument(
+        "--no-tls",
+        action="store_true",
+        help="serve plain HTTP even if a local mkcert certificate is available",
+    )
     u.set_defaults(fn=cmd_ui)
 
     args = p.parse_args(argv)
