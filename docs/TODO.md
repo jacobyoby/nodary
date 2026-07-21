@@ -14,16 +14,14 @@
       the local fact row, which is correct for baselines but should be marked)
 
 ## v1.x quality
-- [ ] UI redesign — current dashboard is a bare-bones monospace list.
-      Proper visual design: typography, light mode, sender avatars/initials,
-      readable date grouping, score visualization better than a raw number.
-      Constraint stays: single self-contained page, zero external assets.
-- [ ] TLS for the dashboard. Note: Let's Encrypt can't issue for
-      127.0.0.1/localhost, and requesting a public cert would also publish the
-      hostname in Certificate Transparency logs — wrong tool for a
-      privacy-first local app. Plan: locally-trusted cert via mkcert or a
-      self-signed cert with a first-run trust prompt. If remote access is ever
-      wanted, do it via Tailscale/SSH tunnel — never a public listener.
+- [x] UI redesign (v0.2.0) — typography, light mode, sender initials,
+      readable dates, score rings + contribution bars. Constraint kept:
+      single self-contained page, zero external assets.
+- [x] TLS for the dashboard (v0.2.0) — locally-trusted mkcert certificate,
+      generated on first `nodary ui` start; plain-HTTP fallback with warning.
+      Let's Encrypt rejected as designed (can't issue for 127.0.0.1, and CT
+      logs would publish the hostname). Remote access stays SSH/Tailscale
+      only — never a public listener.
 - [ ] Weight calibration harness: replay a labeled mailbox, report
       score distributions per tier (still fully local)
 - [ ] Confusables table: replace curated subset with generated UTS #39
