@@ -8,6 +8,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Added
+- CI (GitHub Actions): ruff lint, `ruff format --check`, and the test suite on
+  Python 3.12 and 3.13, plus a separate job covering the `sqlcipher` extra so a
+  missing wheel for one interpreter cannot red the whole matrix. `uv sync
+  --locked` fails the build if `uv.lock` drifts from `pyproject.toml`, so a
+  dependency edit cannot land without the lockfile.
+
 ## [0.2.0] — 2026-07-21
 
 ### Added

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the floor declared in pyproject; 3.13 catches upcoming
+        # deprecations before they reach the floor version.
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        # --locked fails if uv.lock is out of date with pyproject.toml, so a
+        # dependency edit that skipped the lockfile cannot merge silently.
+        # The sqlcipher extra is deliberately excluded here and covered by its
+        # own job, so a missing wheel for one interpreter cannot red the whole
+        # matrix.
+        run: uv sync --locked --dev
+
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest -q
+
+  sqlcipher:
+    # Encrypted storage is the security-relevant path, so it gets exercised
+    # explicitly rather than relying on whatever the default install pulls in.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install with sqlcipher extra
+        run: uv sync --locked --all-extras --dev
+
+      - name: Test
+        run: uv run pytest -q
