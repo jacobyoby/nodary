@@ -5,7 +5,10 @@ __pycache__/
 dist/
 .pytest_cache/
 .ruff_cache/
-uv.lock
+
+# uv.lock IS committed. nodary is an application, not a library: pinning the
+# exact dependency graph is what makes a build reproducible and what lets CI
+# run `uv sync --locked` to reject a dependency edit that skipped the lockfile.
 
 # never commit a mailbox database or key material
 *.db
