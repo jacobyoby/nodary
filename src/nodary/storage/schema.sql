@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   email       TEXT NOT NULL UNIQUE,
   imap_host   TEXT NOT NULL,
   imap_port   INTEGER NOT NULL DEFAULT 993,
-  auth_method TEXT NOT NULL CHECK (auth_method IN ('oauth2','app_password')),
+  auth_method TEXT NOT NULL CHECK (auth_method IN ('oauth2','app_password','mail_store')),
   created_at  INTEGER NOT NULL
   -- no secrets here: tokens/passwords live in the OS keychain,
   -- keyed by "nodary/account/<id>"

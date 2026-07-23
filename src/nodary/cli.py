@@ -65,23 +65,38 @@ def cmd_sync(args) -> int:
     if not accounts:
         print("no accounts. run: nodary add-account", file=sys.stderr)
         return 1
+    mail_store = None
     for acct in accounts:
-        secret = get_account_secret(acct["id"])
-        if not secret:
-            print(
-                f"no credential for {acct['email']}; run nodary set-secret",
-                file=sys.stderr,
-            )
-            return 1
-        transport = ImapTransport(acct["imap_host"], acct["imap_port"])
-        try:
-            if acct["auth_method"] == "oauth2":
-                transport.login_oauth2(acct["email"], secret)
-            else:
-                transport.login_password(acct["email"], secret)
-            stats = sync_account(conn, transport, acct["id"])
-        finally:
-            transport.logout()
+        if acct["auth_method"] == "mail_store":
+            from .mail_store import MailStore, MailStoreTransport
+
+            if mail_store is None:
+                mail_store = MailStore()
+            uuid = mail_store.detect_account_uuid(acct["email"])
+            if uuid is None:
+                print(
+                    f"{acct['email']}: not found in the local Apple Mail store",
+                    file=sys.stderr,
+                )
+                return 1
+            stats = sync_account(conn, MailStoreTransport(mail_store, uuid), acct["id"])
+        else:
+            secret = get_account_secret(acct["id"])
+            if not secret:
+                print(
+                    f"no credential for {acct['email']}; run nodary set-secret",
+                    file=sys.stderr,
+                )
+                return 1
+            transport = ImapTransport(acct["imap_host"], acct["imap_port"])
+            try:
+                if acct["auth_method"] == "oauth2":
+                    transport.login_oauth2(acct["email"], secret)
+                else:
+                    transport.login_password(acct["email"], secret)
+                stats = sync_account(conn, transport, acct["id"])
+            finally:
+                transport.logout()
         print(f"{acct['email']}: {stats.new_messages} new messages")
         if stats.invalidated_folders:
             print(
@@ -92,6 +107,24 @@ def cmd_sync(args) -> int:
             print("  replaying history for exact baselines…")
             n = rebuild(conn)
             print(f"  rebuilt profiles and scores from {n} messages")
+    return 0
+
+
+def cmd_set_source(args) -> int:
+    conn = _open()
+    row = conn.execute(
+        "SELECT email FROM accounts WHERE id = ?", (args.account_id,)
+    ).fetchone()
+    if row is None:
+        print(f"no account #{args.account_id}", file=sys.stderr)
+        return 1
+    method = "mail_store" if args.source == "mail-store" else "app_password"
+    conn.execute(
+        "UPDATE accounts SET auth_method = ? WHERE id = ?",
+        (method, args.account_id),
+    )
+    conn.commit()
+    print(f"account #{args.account_id} ({row['email']}) source -> {args.source}")
     return 0
 
 
@@ -135,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
 
     y = sub.add_parser("sync", help="incremental read-only sync + scoring")
     y.set_defaults(fn=cmd_sync)
+
+    c = sub.add_parser(
+        "set-source", help="switch an account between IMAP and the local Apple Mail store"
+    )
+    c.add_argument("account_id", type=int)
+    c.add_argument("source", choices=["imap", "mail-store"])
+    c.set_defaults(fn=cmd_set_source)
 
     r = sub.add_parser("rebuild", help="recompute all profiles/tiers/scores from facts")
     r.set_defaults(fn=cmd_rebuild)
