@@ -79,7 +79,14 @@ def cmd_sync(args) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            stats = sync_account(conn, MailStoreTransport(mail_store, uuid), acct["id"])
+            transport = MailStoreTransport(mail_store, uuid)
+            stats = sync_account(conn, transport, acct["id"])
+            if transport.skipped:
+                print(
+                    f"  warning: {transport.skipped} indexed message(s) had no "
+                    "readable .emlx and were skipped",
+                    file=sys.stderr,
+                )
         else:
             secret = get_account_secret(acct["id"])
             if not secret:

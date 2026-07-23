@@ -64,6 +64,7 @@ class MailStoreTransport:
     def __init__(self, store: MailStore, account_uuid: str):
         self.store = store
         self.account_uuid = account_uuid
+        self.skipped = 0  # indexed messages whose .emlx was missing/unreadable
         self._folder: str | None = None
         self._mailbox_rowid: int | None = None
         self._parts: dict[int, dict[str, bytes]] = {}
@@ -77,7 +78,12 @@ class MailStoreTransport:
         self._folder = name
         self._mailbox_rowid = self.store.mailbox_rowid(self.account_uuid, name)
         return {
-            "uidvalidity": 1,
+            # the mailbox ROWID stands in for UIDVALIDITY: if the store is
+            # ever recreated (new machine, Mail reset), mailbox rowids change
+            # and the standard invalidate-and-refetch path fires — otherwise
+            # message rowids could restart below the high-water mark and new
+            # mail would be skipped forever
+            "uidvalidity": self._mailbox_rowid,
             "uidnext": self.store.max_rowid(self._mailbox_rowid) + 1,
         }
 
@@ -92,6 +98,7 @@ class MailStoreTransport:
         for uid in uids:
             path = self.store.message_path(self.account_uuid, self._folder, uid)
             if path is None:
+                self.skipped += 1
                 continue
             try:
                 raw = read_emlx(path).rfc822
@@ -99,10 +106,12 @@ class MailStoreTransport:
                 parts: dict[str, bytes] = {}
                 bodystructure = _build(msg, "", parts)
             except (EmlxError, OSError):
+                self.skipped += 1
                 continue
             except Exception:
                 # a single malformed message must never abort the sync;
                 # skip it and let the high-water mark move past
+                self.skipped += 1
                 continue
             self._parts[uid] = parts
             out[uid] = {
@@ -120,8 +129,13 @@ class MailStoreTransport:
 
 
 def _header_bytes(raw: bytes) -> bytes:
-    for sep in (b"\r\n\r\n", b"\n\n"):
-        idx = raw.find(sep)
-        if idx != -1:
-            return raw[: idx + len(sep)]
-    return raw
+    """Everything up to the first blank line, whichever line ending wins."""
+    ends = [
+        (idx, len(sep))
+        for sep in (b"\r\n\r\n", b"\n\n")
+        if (idx := raw.find(sep)) != -1
+    ]
+    if not ends:
+        return raw
+    idx, seplen = min(ends)
+    return raw[: idx + seplen]

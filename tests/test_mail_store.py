@@ -122,3 +122,21 @@ def test_partial_emlx_headers_still_parse(store):
     t.select_readonly("Sent Messages")
     meta = t.fetch_meta([1202])
     assert b"Subject: re: report" in meta[1202]["header"]
+
+
+def test_uidvalidity_tracks_mailbox_identity(store):
+    """A recreated store (new mailbox rowids) must change uidvalidity so
+    sync invalidates and refetches instead of silently missing low rowids."""
+    t = MailStoreTransport(store, UUID)
+    inbox = t.select_readonly("INBOX")
+    sent = t.select_readonly("Sent Messages")
+    assert inbox["uidvalidity"] != sent["uidvalidity"]
+
+
+def test_missing_emlx_counted_as_skipped(store):
+    t = MailStoreTransport(store, UUID)
+    t.select_readonly("INBOX")
+    # 1203 is indexed but deleted=1 and has no file on disk
+    meta = t.fetch_meta([1201, 1203])
+    assert set(meta) == {1201}
+    assert t.skipped == 1
