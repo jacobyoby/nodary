@@ -105,3 +105,24 @@ def test_sent_folder_gives_two_way_tier(conn):
            WHERE s.email_norm = 'dana@acme-corp.com'"""
     ).fetchone()["trust_tier"]
     assert tier == 3
+
+
+def test_direction_uses_normalized_addresses(conn):
+    """A dotted-gmail identity must match its dotless normalized form (and
+    vice versa): direction detection compares normalized, not raw substrings."""
+    conn.execute(
+        "INSERT INTO user_identities (account_id, email_norm) VALUES (1, ?)",
+        ("jacob.e.durham@gmail.com",),
+    )
+    conn.commit()
+    t = FakeTransport()
+    t.add("INBOX", make_email("Jacob.E.Durham@gmail.com", display="Jacob"))
+    t.add("INBOX", make_email("jacobedurham@gmail.com", display="Jacob"))
+    t.add("INBOX", make_email("dana@acme-corp.com"))
+    sync_account(conn, t, account_id=1)
+    rows = conn.execute(
+        "SELECT from_email_norm, direction FROM messages ORDER BY uid"
+    ).fetchall()
+    dirs = {r["from_email_norm"]: r["direction"] for r in rows}
+    assert dirs["jacobedurham@gmail.com"] == "out"
+    assert dirs["dana@acme-corp.com"] == "in"

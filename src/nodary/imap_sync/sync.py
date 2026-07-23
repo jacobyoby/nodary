@@ -15,8 +15,10 @@ import time
 from dataclasses import dataclass, field
 from email import policy
 from email.parser import BytesParser
+from email.utils import parseaddr
 
 from ..feature_extraction.extract import MAX_TEXT_SCAN_BYTES, record_from_headers
+from ..feature_extraction.normalize import normalize_address
 from ..feature_extraction.records import AttachmentInfo
 from ..pipeline import ingest_message
 from .bodystructure import PartInfo, walk
@@ -139,10 +141,10 @@ def sync_folder(
                 if p.is_attachment
             ]
             link_text, fully = _gather_text(transport, uid, parts)
-            from_hdr = str(msg.get("From", "")).lower()
+            _, from_addr = parseaddr(str(msg.get("From", "")))
             direction = (
                 "out"
-                if role == "sent" or any(a in from_hdr for a in my_addrs)
+                if role == "sent" or normalize_address(from_addr) in my_addrs
                 else "in"
             )
             record = record_from_headers(
@@ -170,8 +172,10 @@ def sync_account(
     transport: Transport,
     account_id: int,
 ) -> SyncStats:
+    # normalize both sides: stored identities may predate normalization
+    # (e.g. dotted gmail addresses), and the From header is always raw
     my_addrs = frozenset(
-        r["email_norm"]
+        normalize_address(r["email_norm"])
         for r in conn.execute(
             "SELECT email_norm FROM user_identities WHERE account_id = ?",
             (account_id,),
