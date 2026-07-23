@@ -27,7 +27,9 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 - `set-source` clears the account's synced facts when switching transports,
   preventing double-counted history under the new folder layout.
 - Mail-store account detection tries every registered identity, not only the
-  primary address.
+  primary address — primary first, and a store account can be claimed by at
+  most one nodary account per sync (identities shared across accounts
+  previously let a second account re-ingest the first account's store).
 - The mail-store transport no longer decodes or retains attachment bytes when
   building message structure; only bounded text parts are held.
 - Empty folders no longer mark every sync as an initial backfill (which

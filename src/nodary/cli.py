@@ -66,31 +66,41 @@ def cmd_sync(args) -> int:
         print("no accounts. run: nodary add-account", file=sys.stderr)
         return 1
     mail_store = None
+    claimed_uuids: set[str] = set()
     for acct in accounts:
         if acct["auth_method"] == "mail_store":
             from .mail_store import MailStore, MailStoreTransport
 
             if mail_store is None:
                 mail_store = MailStore()
-            # try every identity of the account: the store may only hold
-            # sent mail from an alias, not the primary address
-            identities = [
+            # primary address first; aliases only as fallback. Identities may
+            # be shared across accounts, so an alias can point at a store
+            # that belongs to a different account — each store UUID may be
+            # claimed by at most one account per sync.
+            identities = [acct["email"]] + [
                 r["email_norm"]
                 for r in conn.execute(
-                    "SELECT email_norm FROM user_identities WHERE account_id = ?",
-                    (acct["id"],),
+                    "SELECT email_norm FROM user_identities"
+                    " WHERE account_id = ? AND email_norm != ?",
+                    (acct["id"], acct["email"]),
                 )
             ]
             uuid = next(
-                filter(None, (mail_store.detect_account_uuid(i) for i in identities)),
+                (
+                    u
+                    for u in (mail_store.detect_account_uuid(i) for i in identities)
+                    if u is not None and u not in claimed_uuids
+                ),
                 None,
             )
             if uuid is None:
                 print(
-                    f"{acct['email']}: not found in the local Apple Mail store",
+                    f"{acct['email']}: no unclaimed account found in the local"
+                    " Apple Mail store",
                     file=sys.stderr,
                 )
                 return 1
+            claimed_uuids.add(uuid)
             transport = MailStoreTransport(mail_store, uuid)
             stats = sync_account(conn, transport, acct["id"])
             if transport.skipped:

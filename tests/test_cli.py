@@ -71,3 +71,32 @@ def test_set_source_clears_stale_facts(env, monkeypatch, store, capsys):  # noqa
     conn = _open()
     assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
     assert conn.execute("SELECT MAX(last_seen_uid) FROM folders").fetchone()[0] == 0
+
+
+def test_shared_alias_cannot_bind_two_accounts_to_one_store(
+    env, monkeypatch, store, capsys
+):  # noqa: F811
+    """Identities shared across accounts must not let a second account claim
+    (and re-ingest) a store already bound to the first."""
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
+    _add_account(monkeypatch)  # jacob@example.com -> the store's account
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": "x")
+    main(
+        [
+            "add-account",
+            "other@nowhere.example",
+            "--host",
+            "h",
+            "--alias",
+            "jacob@example.com",  # alias points at account 1's store
+        ]
+    )
+    main(["set-source", "1", "mail-store"])
+    main(["set-source", "2", "mail-store"])
+    assert main(["sync"]) == 1  # account 2 must fail, not steal the store
+    err = capsys.readouterr().err
+    assert "no unclaimed account" in err
+    from nodary.cli import _open
+
+    n = _open().execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assert n == 2  # only account 1's messages, ingested once
