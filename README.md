@@ -1,5 +1,8 @@
 # nodary
 
+[![CI](https://github.com/jacobyoby/nodary/actions/workflows/ci.yml/badge.svg)](https://github.com/jacobyoby/nodary/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Nodary is a local-first email heuristic analysis client. It connects to IMAP
 read-only and builds a behavioral profile of senders from message metadata and
 structure. All extraction, profiling, scoring, and display happen on the local

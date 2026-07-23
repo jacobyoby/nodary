@@ -2,6 +2,8 @@
 name = "nodary"
 version = "0.3.0"
 description = "Local-first email heuristic analysis client. All analysis on-device."
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "imapclient>=3.0",

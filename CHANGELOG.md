@@ -6,6 +6,14 @@ All notable changes to nodary are documented here. Format follows
 (`ENGINE_VERSION` in `src/nodary/scoring/registry.py`) recorded on every
 stored score; bump it whenever a feature, weight, or threshold changes.
 
+## [Unreleased]
+
+### Added
+- MIT license, CI/license badges, and GitHub topics; `license` metadata in
+  `pyproject.toml`.
+- `nodary set-source <id> imap --auth oauth2` restores the right auth method
+  for OAuth2 accounts (previously always reverted to `app_password`).
+
 ## [0.3.0] — 2026-07-23
 
 ### Added

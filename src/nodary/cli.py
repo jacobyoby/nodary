@@ -125,7 +125,7 @@ def cmd_set_source(args) -> int:
     if row is None:
         print(f"no account #{args.account_id}", file=sys.stderr)
         return 1
-    method = "mail_store" if args.source == "mail-store" else "app_password"
+    method = "mail_store" if args.source == "mail-store" else args.auth
     conn.execute(
         "UPDATE accounts SET auth_method = ? WHERE id = ?",
         (method, args.account_id),
@@ -182,6 +182,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     c.add_argument("account_id", type=int)
     c.add_argument("source", choices=["imap", "mail-store"])
+    c.add_argument(
+        "--auth",
+        choices=["oauth2", "app_password"],
+        default="app_password",
+        help="auth method restored when switching back to imap",
+    )
     c.set_defaults(fn=cmd_set_source)
 
     r = sub.add_parser("rebuild", help="recompute all profiles/tiers/scores from facts")
