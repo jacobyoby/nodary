@@ -74,8 +74,11 @@ def test_set_source_clears_stale_facts(env, monkeypatch, store, capsys):  # noqa
 
 
 def test_shared_alias_cannot_bind_two_accounts_to_one_store(
-    env, monkeypatch, store, capsys
-):  # noqa: F811
+    env,
+    monkeypatch,
+    store,  # noqa: F811
+    capsys,
+):
     """Identities shared across accounts must not let a second account claim
     (and re-ingest) a store already bound to the first."""
     monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
