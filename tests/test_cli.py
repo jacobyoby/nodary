@@ -18,6 +18,8 @@ def env(tmp_path, monkeypatch):
 
 def _add_account(monkeypatch, email="jacob@example.com"):
     monkeypatch.setattr("getpass.getpass", lambda prompt="": "sekrit")
+    # never touch the real OS keyring from tests (also absent on CI runners)
+    monkeypatch.setattr("nodary.cli.set_account_secret", lambda *_: None)
     return main(["add-account", email, "--host", "imap.example.com"])
 
 
