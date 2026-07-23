@@ -25,7 +25,14 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 - SQLCipher connections crashed on first query: `sqlite3.Row` rejects
   sqlcipher3 cursors. Each dbapi module now supplies its own Row type.
 - A malformed `.emlx` or unparseable message no longer aborts a mail-store
-  sync; the message is skipped and the high-water mark advances.
+  sync; the message is skipped, counted, and reported after the sync.
+- Direction and to-me detection compare normalized addresses on both sides;
+  the previous raw-substring match never recognized identities whose stored
+  form differs from the header (e.g. dotted gmail addresses).
+- Mail-store `uidvalidity` derives from the mailbox ROWID instead of a
+  constant, so a recreated Envelope Index (new machine, Mail reset) triggers
+  invalidate-and-refetch instead of silently skipping mail whose rowids
+  restarted below the high-water mark.
 
 ## [0.2.0] — 2026-07-21
 
