@@ -13,6 +13,28 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   `pyproject.toml`.
 - `nodary set-source <id> imap --auth oauth2` restores the right auth method
   for OAuth2 accounts (previously always reverted to `app_password`).
+- Automatic in-place migration widens the `accounts.auth_method` CHECK on
+  databases created before `mail_store` existed.
+- README documents all environment variables.
+
+### Fixed
+- **Security:** self-From alone no longer bypasses scoring. A spoofed message
+  using the user's own address that fails DMARC is classified incoming and
+  scored; genuine self-sent copies (no verdict, or pass) stay outgoing.
+- The sync high-water mark no longer advances past messages the transport
+  could not serve (e.g. an `.emlx` not yet downloaded by Mail); they are
+  retried on the next sync instead of being skipped forever.
+- `set-source` clears the account's synced facts when switching transports,
+  preventing double-counted history under the new folder layout.
+- Mail-store account detection tries every registered identity, not only the
+  primary address.
+- The mail-store transport no longer decodes or retains attachment bytes when
+  building message structure; only bounded text parts are held.
+- Empty folders no longer mark every sync as an initial backfill (which
+  triggered a full rebuild on each run).
+- Tier 3 is labeled "established" (it includes user-initiated threads that
+  have no reply yet, so "two-way" overstated it); stale design-doc and
+  docstring claims corrected; `__version__` synced to 0.3.0.
 
 ## [0.3.0] — 2026-07-23
 

@@ -1,7 +1,8 @@
 # Nodary — Design Proposal v0.1: Storage Schema & Feature Vector
 
-Status: **for review** — nothing below is implemented yet. The sync engine starts
-after this document is approved.
+Status: **historical proposal** — kept for design rationale. The implementation
+has since evolved past it; where they disagree, the code and
+`src/nodary/storage/schema.sql` are authoritative.
 
 ## 1. Privacy invariants the schema must uphold
 
@@ -17,7 +18,7 @@ after this document is approved.
    the keychain — the `accounts` table holds connection metadata only.
 4. **Everything derived is recomputable.** Aggregates (`sender_profiles`,
    `domain_profiles`) are caches over the `messages` fact table; a
-   `rebuild-profiles` command can regenerate them, which lets us change the
+   `nodary rebuild` command can regenerate them, which lets us change the
    profile format without re-downloading mail.
 
 All timestamps are UTC unix epoch seconds (`INTEGER`). All email addresses are

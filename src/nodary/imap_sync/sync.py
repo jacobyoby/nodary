@@ -17,7 +17,11 @@ from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr
 
-from ..feature_extraction.extract import MAX_TEXT_SCAN_BYTES, record_from_headers
+from ..feature_extraction.extract import (
+    MAX_TEXT_SCAN_BYTES,
+    parse_auth_results,
+    record_from_headers,
+)
 from ..feature_extraction.normalize import normalize_address
 from ..feature_extraction.records import AttachmentInfo
 from ..pipeline import ingest_message
@@ -117,18 +121,24 @@ def sync_folder(
         row = conn.execute(
             "SELECT * FROM folders WHERE id = ?", (folder_id,)
         ).fetchone()
-    if row["last_seen_uid"] == 0:
-        stats.initial_backfill = True
-
     conn.execute(
         "UPDATE folders SET uidvalidity = ? WHERE id = ?",
         (server["uidvalidity"], folder_id),
     )
 
     uids = transport.new_uids(row["last_seen_uid"])
+    if row["last_seen_uid"] == 0 and uids:
+        stats.initial_backfill = True
     for start in range(0, len(uids), BATCH_SIZE):
         batch = uids[start : start + BATCH_SIZE]
         meta = transport.fetch_meta(batch)
+        # Never advance the high-water mark past a UID we could not fetch —
+        # the mail store indexes messages before their .emlx lands on disk,
+        # and advancing would orphan them forever. Stop at the first gap and
+        # retry from there next sync.
+        missing = [u for u in batch if u not in meta]
+        if missing:
+            batch = [u for u in batch if u < min(missing)]
         for uid in batch:
             m = meta.get(uid)
             if m is None:
@@ -142,9 +152,15 @@ def sync_folder(
             ]
             link_text, fully = _gather_text(transport, uid, parts)
             _, from_addr = parseaddr(str(msg.get("From", "")))
+            # Self-From alone must not bypass scoring: a spoofed message
+            # arriving from outside is stamped Authentication-Results by the
+            # receiving server and fails DMARC, while genuinely self-sent
+            # copies either carry no verdict (own sent mail) or pass.
+            auth = parse_auth_results(msg.get("Authentication-Results", "") or "")
+            is_self = normalize_address(from_addr) in my_addrs
             direction = (
                 "out"
-                if role == "sent" or normalize_address(from_addr) in my_addrs
+                if role == "sent" or (is_self and auth.get("dmarc") != "fail")
                 else "in"
             )
             record = record_from_headers(
@@ -160,11 +176,14 @@ def sync_folder(
                 continue  # unparseable From; nothing to attribute
             ingest_message(conn, folder_id, uid, record)
             stats.new_messages += 1
-        conn.execute(
-            "UPDATE folders SET last_seen_uid = ?, last_synced_at = ? WHERE id = ?",
-            (max(batch), int(time.time()), folder_id),
-        )
-        conn.commit()
+        if batch:
+            conn.execute(
+                "UPDATE folders SET last_seen_uid = ?, last_synced_at = ? WHERE id = ?",
+                (max(batch), int(time.time()), folder_id),
+            )
+            conn.commit()
+        if missing:
+            return  # gap: everything from min(missing) on retries next sync
 
 
 def sync_account(

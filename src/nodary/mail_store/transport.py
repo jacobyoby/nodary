@@ -5,9 +5,12 @@ Because the raw message is on disk, parts are served already decoded: the
 synthesized BODYSTRUCTURE declares an empty content-transfer-encoding and
 fetch_part returns decoded bytes, which sync passes through unchanged.
 
-UIDVALIDITY is constant: Envelope Index ROWIDs come from AUTOINCREMENT and
-are never reused, so the high-water-mark contract holds for the life of the
-store.
+UIDVALIDITY is the mailbox ROWID (see select_readonly), so a recreated
+Envelope Index invalidates and refetches instead of silently skipping mail.
+
+Only bounded text parts are decoded and retained for link extraction;
+attachments and oversized parts contribute their size to the structure but
+their bytes are never held.
 """
 
 from __future__ import annotations
@@ -16,13 +19,14 @@ from email import policy
 from email.message import Message
 from email.parser import BytesParser
 
+from ..feature_extraction.extract import MAX_TEXT_SCAN_BYTES
 from .emlx import EmlxError, read_emlx
 from .store import MailStore
 
 _parser = BytesParser(policy=policy.default)
 
 
-def _leaf_tuple(part: Message) -> tuple:
+def _leaf_tuple(part: Message, size: int) -> tuple:
     params: list[str] = []
     charset = part.get_content_charset()
     if charset:
@@ -30,7 +34,6 @@ def _leaf_tuple(part: Message) -> tuple:
     filename = part.get_filename() or ""
     if filename:
         params += ["name", filename]
-    payload = part.get_payload(decode=True) or b""
     disposition = None
     if part.get_content_disposition() == "attachment":
         disposition = ("attachment", ("filename", filename))
@@ -41,23 +44,41 @@ def _leaf_tuple(part: Message) -> tuple:
         None,
         None,
         "",  # encoding: parts are served decoded
-        len(payload),
+        size,
         disposition,
+    )
+
+
+def _is_scannable_text(part: Message) -> bool:
+    return (
+        part.get_content_maintype() == "text"
+        and part.get_content_subtype() in ("plain", "html")
+        and part.get_content_disposition() != "attachment"
     )
 
 
 def _build(part: Message, section: str, parts_out: dict[str, bytes]) -> tuple:
     """Synthesize a BODYSTRUCTURE tuple bodystructure.walk() understands,
-    mirroring its section numbering, while collecting decoded payloads."""
+    mirroring its section numbering. Only scannable text parts have their
+    decoded bytes retained (bounded); everything else is size-only."""
     if part.is_multipart() and part.get_content_maintype() == "multipart":
         children = []
         for i, child in enumerate(part.get_payload(), 1):
             children.append(_build(child, f"{section}{i}.", parts_out))
         return (children, part.get_content_subtype())
     leaf_section = section.rstrip(".") or "1"
-    if part.get_content_maintype() != "message":
-        parts_out[leaf_section] = part.get_payload(decode=True) or b""
-    return _leaf_tuple(part)
+    if part.get_content_maintype() == "message":
+        return _leaf_tuple(part, 0)
+    if _is_scannable_text(part):
+        data = part.get_payload(decode=True) or b""
+        if len(data) <= MAX_TEXT_SCAN_BYTES:
+            parts_out[leaf_section] = data
+        return _leaf_tuple(part, len(data))
+    # attachments/binary: approximate size from the still-encoded payload
+    # without decoding or retaining it
+    raw = part.get_payload()
+    size = len(raw) if isinstance(raw, str) else 0
+    return _leaf_tuple(part, size)
 
 
 class MailStoreTransport:

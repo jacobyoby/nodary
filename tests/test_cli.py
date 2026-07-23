@@ -56,3 +56,18 @@ def test_sync_from_mail_store(env, monkeypatch, store, capsys):  # noqa: F811
     # incremental: nothing new on the second run
     assert main(["sync"]) == 0
     assert "0 new messages" in capsys.readouterr().out
+
+
+def test_set_source_clears_stale_facts(env, monkeypatch, store, capsys):  # noqa: F811
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
+    _add_account(monkeypatch)
+    main(["set-source", "1", "mail-store"])
+    main(["sync"])
+    from nodary.cli import _open
+
+    assert _open().execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
+    # switching sources must not leave the old transport's facts behind
+    main(["set-source", "1", "imap"])
+    conn = _open()
+    assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    assert conn.execute("SELECT MAX(last_seen_uid) FROM folders").fetchone()[0] == 0

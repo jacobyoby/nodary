@@ -79,7 +79,7 @@ the first match wins:
 
 | Tier | Rule |
 |---:|---|
-| 3 | At least one thread the user replied to, or at least one thread the user initiated: established two-way correspondence. |
+| 3 | At least one thread the user replied to, or at least one thread the user initiated: established correspondence. |
 | 2 | At least two messages spanning at least seven days, without a user reply: prior one-way contact. |
 | 1 | The sender is new, but its registrable domain has at least one replied-to thread and is not a freemail domain: known organization. |
 | 0 | Everything else: never seen or insufficient history. |
@@ -104,8 +104,9 @@ one Gmail address, for example, must not establish trust in every Gmail sender.
   SQLCipher using a random 256-bit key held in the OS keychain. Without that
   extra, Nodary currently falls back to plain SQLite and prints a warning that
   the database is not encrypted at rest.
-- Public Suffix List data and the freemail-domain list are vendored. Nodary does
-  not fetch either list at runtime.
+- Public Suffix List lookups use `tldextract`'s bundled snapshot with runtime
+  fetching disabled; the freemail-domain list lives in
+  `src/nodary/feature_extraction/normalize.py`. Nodary fetches neither at runtime.
 - The dashboard binds to `127.0.0.1` and its page has no outbound requests.
   It serves HTTPS via a locally-trusted mkcert certificate when available;
   certificate generation is fully local (no ACME, no Certificate
@@ -124,6 +125,15 @@ For an encrypted database at rest, install the SQLCipher extra:
 ```sh
 uv sync --extra sqlcipher
 ```
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NODARY_DB` | `~/.nodary/nodary.db` | Database location. |
+| `NODARY_DB_KEY` | keychain-managed | Hex database key override (tests/CI; normally the key lives only in the OS keychain). |
+| `NODARY_MAIL_STORE` | `~/Library/Mail/V10` | Apple Mail store root for the mail-store source. |
+| `NODARY_CERT_DIR` | `~/.nodary/tls` | Dashboard TLS certificate directory. |
 
 ## CLI
 

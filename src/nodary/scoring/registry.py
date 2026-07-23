@@ -1,6 +1,7 @@
 """The feature registry: every feature's name, weight, and group, in one
 place. Changing anything here bumps ENGINE_VERSION, which marks previously
-stored scores as stale (the UI shows the version each score was computed with).
+stored scores as stale (each stored score records the version it was
+computed with).
 
 Score = min(100, Σ raw × weight). Features are monotone: absence of anomaly
 contributes 0, never negative — normal-looking behavior cannot buy down a

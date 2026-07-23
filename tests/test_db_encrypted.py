@@ -47,3 +47,30 @@ def test_file_is_actually_encrypted(tmp_path):
     path = tmp_path / "enc.db"
     storage_db.connect(path, KEY).close()
     assert not path.read_bytes().startswith(b"SQLite format 3")
+
+
+def test_migration_widens_auth_method_check(tmp_path):
+    """Databases created before mail_store existed must accept it after a
+    plain connect() — the migration rebuilds the accounts table."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        """
+        CREATE TABLE accounts (
+          id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE,
+          imap_host TEXT NOT NULL, imap_port INTEGER NOT NULL DEFAULT 993,
+          auth_method TEXT NOT NULL CHECK (auth_method IN ('oauth2','app_password')),
+          created_at INTEGER NOT NULL);
+        INSERT INTO accounts VALUES (1,'a@b.c','h',993,'app_password',0);
+        """
+    )
+    raw.close()
+    conn = storage_db.connect(path, None)
+    conn.execute("UPDATE accounts SET auth_method='mail_store' WHERE id=1")
+    conn.commit()
+    assert (
+        conn.execute("SELECT auth_method FROM accounts").fetchone()["auth_method"]
+        == "mail_store"
+    )

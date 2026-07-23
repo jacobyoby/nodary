@@ -76,11 +76,44 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(_load_schema())
+    _migrate(conn)
     _set_meta_default(conn, "schema_version", SCHEMA_VERSION)
     _set_meta_default(conn, "encryption", encryption)
     _set_meta_default(conn, "created_at", str(int(time.time())))
     conn.commit()
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """In-place migrations for databases created by older schemas.
+    `CREATE TABLE IF NOT EXISTS` never updates existing tables, so
+    constraint changes must be applied by rebuilding the table."""
+    accounts_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'"
+    ).fetchone()
+    if accounts_sql and "mail_store" not in accounts_sql["sql"]:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.executescript(
+            """
+            BEGIN;
+            CREATE TABLE accounts_migrated (
+              id          INTEGER PRIMARY KEY,
+              email       TEXT NOT NULL UNIQUE,
+              imap_host   TEXT NOT NULL,
+              imap_port   INTEGER NOT NULL DEFAULT 993,
+              auth_method TEXT NOT NULL CHECK
+                (auth_method IN ('oauth2','app_password','mail_store')),
+              created_at  INTEGER NOT NULL
+            );
+            INSERT INTO accounts_migrated
+              SELECT id, email, imap_host, imap_port, auth_method, created_at
+              FROM accounts;
+            DROP TABLE accounts;
+            ALTER TABLE accounts_migrated RENAME TO accounts;
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _set_meta_default(conn: sqlite3.Connection, key: str, value: str) -> None:

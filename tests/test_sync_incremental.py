@@ -126,3 +126,40 @@ def test_direction_uses_normalized_addresses(conn):
     dirs = {r["from_email_norm"]: r["direction"] for r in rows}
     assert dirs["jacobedurham@gmail.com"] == "out"
     assert dirs["dana@acme-corp.com"] == "in"
+
+
+def test_spoofed_self_from_is_scored_as_incoming(conn):
+    """A message spoofing the user's own From that fails DMARC must stay
+    'in' (and get scored) — self-From alone is not proof of authorship."""
+    t = FakeTransport()
+    t.add(
+        "INBOX",
+        make_email(
+            ME,
+            display="Jacob",
+            auth_results="mx.example.com; spf=fail; dmarc=fail",
+        ),
+    )
+    t.add("INBOX", make_email(ME, display="Jacob"))  # genuine copy: no verdict
+    sync_account(conn, t, account_id=1)
+    dirs = sorted(
+        r["direction"]
+        for r in conn.execute("SELECT direction FROM messages").fetchall()
+    )
+    assert dirs == ["in", "out"]
+
+
+def test_high_water_mark_stops_at_fetch_gap(conn):
+    """UIDs the transport could not serve must be retried next sync, not
+    skipped forever by an advancing high-water mark."""
+    t = FakeTransport()
+    t.add("INBOX", make_email("dana@acme-corp.com", when=T0))
+    u2 = t.add("INBOX", make_email("erin@acme-corp.com", when=T0))
+    t.add("INBOX", make_email("faye@acme-corp.com", when=T0))
+    t.hide(u2)  # indexed but unfetchable, like a not-yet-downloaded .emlx
+    stats = sync_account(conn, t, account_id=1)
+    assert stats.new_messages == 1  # only the message before the gap
+    t.unhide(u2)
+    stats2 = sync_account(conn, t, account_id=1)
+    assert stats2.new_messages == 2  # gap message and its successor
+    assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 3

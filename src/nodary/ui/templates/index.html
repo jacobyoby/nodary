@@ -116,7 +116,7 @@
 </header>
 <div class="filters" id="filters">
   <button data-tier="" class="on">all</button>
-  <button data-tier="3">tier 3 · two-way</button>
+  <button data-tier="3">tier 3 · established</button>
   <button data-tier="2">tier 2 · one-way</button>
   <button data-tier="1">tier 1 · org known</button>
   <button data-tier="0">tier 0 · never seen</button>
@@ -125,7 +125,7 @@
 <script>
 const esc = s => (s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-const TIER_SHORT = {0: "never seen", 1: "org known", 2: "one-way", 3: "two-way"};
+const TIER_SHORT = {0: "never seen", 1: "org known", 2: "one-way", 3: "established"};
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function fmtDate(ts) {
   const d = new Date(ts * 1000), now = new Date();

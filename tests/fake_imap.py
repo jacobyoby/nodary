@@ -67,6 +67,7 @@ class FakeFolder:
         self.uidvalidity = uidvalidity
         self.next_uid = 1
         self.messages: dict[int, EmailMessage] = {}
+        self.hidden: set[int] = set()
 
     def add(self, msg: EmailMessage) -> int:
         uid = self.next_uid
@@ -84,6 +85,14 @@ class FakeTransport:
     # -- test helpers ------------------------------------------------------
     def add(self, folder: str, msg: EmailMessage) -> int:
         return self.folders[folder].add(msg)
+
+    def hide(self, uid: int, folder: str = "INBOX") -> None:
+        """Make a UID visible to new_uids but absent from fetch_meta,
+        like a mail-store message whose .emlx is not on disk yet."""
+        self.folders[folder].hidden.add(uid)
+
+    def unhide(self, uid: int, folder: str = "INBOX") -> None:
+        self.folders[folder].hidden.discard(uid)
 
     def bump_uidvalidity(self, folder: str) -> None:
         f = self.folders[folder]
@@ -112,6 +121,8 @@ class FakeTransport:
         self.meta_fetches += len(uids)
         out = {}
         for uid in uids:
+            if uid in self._selected.hidden:
+                continue
             msg = self._selected.messages.get(uid)
             if msg is None:
                 continue

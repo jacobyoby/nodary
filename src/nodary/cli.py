@@ -1,4 +1,4 @@
-"""nodary CLI: add-account, sync, rebuild, ui."""
+"""nodary CLI: add-account, set-secret, set-source, sync, rebuild, ui."""
 
 from __future__ import annotations
 
@@ -72,7 +72,19 @@ def cmd_sync(args) -> int:
 
             if mail_store is None:
                 mail_store = MailStore()
-            uuid = mail_store.detect_account_uuid(acct["email"])
+            # try every identity of the account: the store may only hold
+            # sent mail from an alias, not the primary address
+            identities = [
+                r["email_norm"]
+                for r in conn.execute(
+                    "SELECT email_norm FROM user_identities WHERE account_id = ?",
+                    (acct["id"],),
+                )
+            ]
+            uuid = next(
+                filter(None, (mail_store.detect_account_uuid(i) for i in identities)),
+                None,
+            )
             if uuid is None:
                 print(
                     f"{acct['email']}: not found in the local Apple Mail store",
@@ -130,8 +142,20 @@ def cmd_set_source(args) -> int:
         "UPDATE accounts SET auth_method = ? WHERE id = ?",
         (method, args.account_id),
     )
+    # different sources use different folder layouts and UID spaces; stale
+    # facts would double-count history under new folder ids
+    conn.execute(
+        "DELETE FROM messages WHERE folder_id IN"
+        " (SELECT id FROM folders WHERE account_id = ?)",
+        (args.account_id,),
+    )
+    conn.execute(
+        "UPDATE folders SET last_seen_uid = 0, uidvalidity = NULL WHERE account_id = ?",
+        (args.account_id,),
+    )
     conn.commit()
     print(f"account #{args.account_id} ({row['email']}) source -> {args.source}")
+    print("  existing synced facts cleared; the next sync refetches from scratch")
     return 0
 
 
