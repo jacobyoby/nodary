@@ -59,9 +59,12 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
     if HAVE_SQLCIPHER and key:
         conn = sqlcipher3.connect(str(path), check_same_thread=False)
         conn.execute(f"PRAGMA key = \"x'{key}'\"")
+        # each dbapi module only accepts its own Row/Cursor types
+        conn.row_factory = sqlcipher3.dbapi2.Row
         encryption = "sqlcipher"
     else:
         conn = sqlite3.connect(str(path), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         encryption = "none"
         if key and not HAVE_SQLCIPHER:
             print(
@@ -70,7 +73,6 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
                 file=sys.stderr,
             )
 
-    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(_load_schema())
