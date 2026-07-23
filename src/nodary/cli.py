@@ -170,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     y.set_defaults(fn=cmd_sync)
 
     c = sub.add_parser(
-        "set-source", help="switch an account between IMAP and the local Apple Mail store"
+        "set-source",
+        help="switch an account between IMAP and the local Apple Mail store",
     )
     c.add_argument("account_id", type=int)
     c.add_argument("source", choices=["imap", "mail-store"])

@@ -95,11 +95,15 @@ class MailStoreTransport:
                 continue
             try:
                 raw = read_emlx(path).rfc822
+                msg = _parser.parsebytes(raw)
+                parts: dict[str, bytes] = {}
+                bodystructure = _build(msg, "", parts)
             except (EmlxError, OSError):
                 continue
-            msg = _parser.parsebytes(raw)
-            parts: dict[str, bytes] = {}
-            bodystructure = _build(msg, "", parts)
+            except Exception:
+                # a single malformed message must never abort the sync;
+                # skip it and let the high-water mark move past
+                continue
             self._parts[uid] = parts
             out[uid] = {
                 "header": _header_bytes(raw),

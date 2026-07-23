@@ -20,8 +20,8 @@ MULTIPART = (
     b"\r\n"
     b"see https://example.com/x\r\n"
     b"--B\r\n"
-    b"Content-Type: application/pdf; name=\"q.pdf\"\r\n"
-    b"Content-Disposition: attachment; filename=\"q.pdf\"\r\n"
+    b'Content-Type: application/pdf; name="q.pdf"\r\n'
+    b'Content-Disposition: attachment; filename="q.pdf"\r\n'
     b"Content-Transfer-Encoding: base64\r\n"
     b"\r\n"
     b"JVBERg==\r\n"
@@ -70,9 +70,7 @@ def store(tmp_path):
         """
     )
     conn.execute(f"INSERT INTO mailboxes VALUES (1, 'imap://{UUID}/INBOX')")
-    conn.execute(
-        f"INSERT INTO mailboxes VALUES (2, 'imap://{UUID}/Sent%20Messages')"
-    )
+    conn.execute(f"INSERT INTO mailboxes VALUES (2, 'imap://{UUID}/Sent%20Messages')")
     conn.execute("INSERT INTO addresses VALUES (1, 'ada@example.com')")
     conn.execute("INSERT INTO addresses VALUES (2, 'jacob@example.com')")
     conn.execute("INSERT INTO messages VALUES (1201, 1, 1, 0)")

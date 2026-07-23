@@ -6,7 +6,7 @@ All notable changes to nodary are documented here. Format follows
 (`ENGINE_VERSION` in `src/nodary/scoring/registry.py`) recorded on every
 stored score; bump it whenever a feature, weight, or threshold changes.
 
-## [Unreleased]
+## [0.3.0] — 2026-07-23
 
 ### Added
 - CI (GitHub Actions): ruff lint, `ruff format --check`, and the test suite on
@@ -14,6 +14,18 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   missing wheel for one interpreter cannot red the whole matrix. `uv sync
   --locked` fails the build if `uv.lock` drifts from `pyproject.toml`, so a
   dependency edit cannot land without the lockfile.
+- Apple Mail store transport (`nodary.mail_store`): sync accounts from
+  `~/Library/Mail` (Envelope Index + `.emlx`) when direct IMAP is unavailable,
+  e.g. Gmail under Google Advanced Protection. Strictly read-only; requires
+  Full Disk Access. New CLI: `nodary set-source <id> imap|mail-store`.
+- `accounts.auth_method` now allows `mail_store` (existing databases need a
+  one-off table rebuild; new databases pick it up from the schema).
+
+### Fixed
+- SQLCipher connections crashed on first query: `sqlite3.Row` rejects
+  sqlcipher3 cursors. Each dbapi module now supplies its own Row type.
+- A malformed `.emlx` or unparseable message no longer aborts a mail-store
+  sync; the message is skipped and the high-water mark advances.
 
 ## [0.2.0] — 2026-07-21
 

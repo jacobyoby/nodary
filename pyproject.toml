@@ -1,6 +1,6 @@
 [project]
 name = "nodary"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first email heuristic analysis client. All analysis on-device."
 requires-python = ">=3.12"
 dependencies = [

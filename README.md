@@ -185,6 +185,26 @@ browser will warn about an untrusted certificate until you run it.
 The dashboard still binds `127.0.0.1` only. For remote access use an SSH
 tunnel or Tailscale — never a public listener.
 
+### Apple Mail store source (macOS)
+
+When direct IMAP is unavailable — notably Gmail under Google's Advanced
+Protection Program, which blocks app passwords and third-party OAuth — an
+account can instead read from Apple Mail's local store (`~/Library/Mail`),
+covering any account Mail itself already syncs:
+
+```sh
+uv run nodary set-source 1 mail-store   # switch account #1
+uv run nodary set-source 1 imap         # switch back
+```
+
+No credential is needed; the account is matched to the store by the mail it
+has sent. Requires Full Disk Access for the invoking process (System
+Settings → Privacy & Security). Reads are strictly read-only: the Envelope
+Index is opened `mode=ro` and `.emlx` files are only ever parsed, never
+written. Note that Mail stores Gmail messages once under `[Gmail]/All Mail`,
+so incoming and sent Gmail are distinguished by the From header rather than
+by folder.
+
 ### Incremental sync
 
 For each folder, Nodary stores the server's `UIDVALIDITY` and a
