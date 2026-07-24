@@ -1,43 +1,92 @@
-# TODO / Roadmap
+# Roadmap
 
-## v1 hardening (before first real-mailbox run)
-- [ ] OAuth2 refresh-token flow for Gmail/M365 (currently: manually supplied
-      access token via `nodary set-secret`; app passwords work end-to-end)
-- [ ] Large-mailbox pass: measure a 100k-message backfill, tune BATCH_SIZE,
-      consider fetching text parts only for messages ≤ N days old
-- [ ] `nodary status` command (per-folder high-water marks, last sync, engine
-      version, encryption state)
-- [ ] Package a vendored copy of the PSL snapshot version in schema_meta and
-      surface drift in the UI
-- [ ] Handle IMAP CONDSTORE/QRESYNC where available (cheaper than UID ranges)
-- [ ] Message deletion reconciliation (UIDs vanishing server-side; v1 keeps
-      the local fact row, which is correct for baselines but should be marked)
+Nodary is currently **v0.3.0**. This file tracks shipped capability and open
+work; `CHANGELOG.md` remains the release-history source of truth.
 
-## v1.x quality
-- [x] UI redesign (v0.2.0) — typography, light mode, sender initials,
-      readable dates, score rings + contribution bars. Constraint kept:
-      single self-contained page, zero external assets.
-- [x] TLS for the dashboard (v0.2.0) — locally-trusted mkcert certificate,
-      generated on first `nodary ui` start; plain-HTTP fallback with warning.
-      Let's Encrypt rejected as designed (can't issue for 127.0.0.1, and CT
-      logs would publish the hostname). Remote access stays SSH/Tailscale
-      only — never a public listener.
-- [ ] Weight calibration harness: replay a labeled mailbox, report
-      score distributions per tier (still fully local)
-- [ ] Confusables table: replace curated subset with generated UTS #39
-      skeleton data (vendored, versioned)
-- [ ] Dashboard: sender drill-down page (baseline histograms, feature history)
-- [ ] Dormant-resurrection: precompute median gap into sender_profiles to
-      avoid the on-demand query entirely
+## Done by v0.3.0
 
-## v2 (each stays local; see README threat model)
-- [ ] Local body analysis phase (on-device only, opt-in, still no cloud)
-- [ ] Multiple accounts in one dashboard
-- [ ] Optional IMAP IDLE for near-real-time scoring
-- [ ] Export/import of the encrypted profile db for machine migration
-      (explicitly NOT sync between installs)
+- [x] Read-only incremental IMAP sync with UIDVALIDITY/high-water-mark tracking.
+      Why: gives deterministic local history without mutating the mailbox.
+- [x] Header, BODYSTRUCTURE, bounded text-part extraction, and attachment/link
+      structure parsing without persisting body text, subjects, filenames, or
+      full URLs. Why: keeps the behavioral profile privacy-preserving.
+- [x] Sender/domain profiles, trust tiers 0-3, and deterministic scoring engine
+      v1.0.0 with stored feature explanations. Why: scores are recomputable and
+      inspectable.
+- [x] `nodary rebuild` replay path. Why: profiles, tiers, and scores can be
+      regenerated from fact tables after backfills or schema/profile changes.
+- [x] SQLCipher-at-rest support keyed from the OS keychain, plus visible
+      plain-SQLite fallback for development. Why: mailbox-derived behavioral
+      profiles are sensitive local data.
+- [x] Localhost-only dashboard with tier filters and per-message score
+      decomposition. Why: review happens locally with no outbound requests.
+- [x] Dashboard redesign and TLS via local mkcert (v0.2.0). Why: the UI is
+      more readable, and local HTTPS avoids public certificates or CT logs.
+- [x] Apple Mail store transport and `nodary set-source <id> imap|mail-store`
+      (v0.3.0). Why: supports accounts where direct IMAP is unavailable, while
+      remaining read-only.
+- [x] CI for lint, format check, tests, and SQLCipher-extra coverage (v0.3.0).
+      Why: catches lockfile, formatting, interpreter, and optional-encryption
+      regressions before release.
+- [x] `accounts.auth_method` supports `mail_store` for new databases and has an
+      in-place widening migration for older databases. Why: source switching
+      should not require recreating the local database.
 
-## Explicitly rejected (do not add)
-- Telemetry of any kind, including "anonymous" usage stats
-- Cloud scoring APIs, shared reputation feeds, cross-install score sharing
-- Auto-delete / auto-move / auto-report actions
+## Near-Term / Hardening
+
+- [ ] OAuth2 refresh-token flow for Gmail/M365. Why: current OAuth2 support
+      stores a manually supplied access token and requires `nodary set-secret`
+      when it expires.
+- [ ] Large-mailbox pass: measure a 100k-message backfill, tune
+      `imap_sync.sync.BATCH_SIZE`, and consider fetching text parts only for
+      messages <= N days old. Why: first-run performance and memory behavior
+      need real-mailbox validation.
+- [ ] `nodary status` command showing per-folder high-water marks, last sync,
+      engine version, and encryption state. Why: `/api/status` exists for the
+      UI, but operators need a CLI health check.
+- [ ] Package a vendored Public Suffix List snapshot version in `schema_meta`
+      and surface drift in the UI. Why: registrable-domain decisions affect
+      scoring and should be auditable across rebuilds.
+- [ ] Generalize schema migrations beyond the current `accounts.auth_method`
+      rebuild. Why: `schema_meta.schema_version` exists, and future table or
+      column changes need a reliable upgrade path for existing databases.
+- [ ] Message deletion reconciliation for UIDs that vanish server-side. Why:
+      retaining local facts is correct for baselines, but deleted/server-missing
+      messages should be marked so sync status is understandable.
+- [ ] Weight calibration harness that replays a labeled mailbox and reports
+      score distributions per tier. Why: weights are deterministic but need
+      empirical tuning against realistic benign and malicious examples.
+- [ ] Mail-store portability checks for Apple Mail layouts beyond verified V10.
+      Why: `mail_store.store` currently assumes the V10 layout and should fail
+      clearly or support newer layouts when macOS changes them.
+
+## Mid-Term
+
+- [ ] Handle IMAP CONDSTORE/QRESYNC where available. Why: change-aware sync is
+      cheaper than UID range scans for large mailboxes.
+- [ ] Confusables table generation from vendored Unicode UTS #39 skeleton data.
+      Why: the current curated subset is auditable but incomplete.
+- [ ] Dashboard sender drill-down page with baseline histograms and feature
+      history. Why: a high score is easier to trust when the underlying sender
+      baseline is visible.
+- [ ] Dormant-resurrection median-gap precomputation in `sender_profiles`. Why:
+      the scoring engine currently queries message history on demand for that
+      rare feature.
+- [ ] Multiple accounts in one dashboard. Why: storage supports accounts, but
+      the dashboard is not yet account-aware for filtering and comparison.
+- [ ] Optional IMAP IDLE for near-real-time scoring. Why: polling is enough for
+      v1, but IDLE can reduce latency without changing the local-only model.
+
+## Later / Research
+
+- [ ] Local body analysis phase, on-device only and opt-in. Why: semantic or
+      content signals may help, but they must not weaken the privacy model.
+- [ ] Export/import of the encrypted profile database for machine migration.
+      Why: moving a local-first installation should be explicit and should not
+      become cross-install sync.
+
+## Explicitly Rejected
+
+- Telemetry of any kind, including "anonymous" usage stats.
+- Cloud scoring APIs, shared reputation feeds, or cross-install score sharing.
+- Auto-delete, auto-move, auto-report, quarantine, or any other mailbox action.

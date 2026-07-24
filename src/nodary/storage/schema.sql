@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS message_link_domains (
 );
 
 -- Outgoing mail only: which known contacts a sent message was addressed to.
--- Required to compute Tier 3 (two-way correspondence) and keep it recomputable.
+-- Required to compute Tier 3 (established correspondence) and keep it recomputable.
 CREATE TABLE IF NOT EXISTS message_recipients (
   message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   sender_id  INTEGER NOT NULL REFERENCES senders(id),

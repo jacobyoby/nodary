@@ -3,10 +3,11 @@
 [![CI](https://github.com/jacobyoby/nodary/actions/workflows/ci.yml/badge.svg)](https://github.com/jacobyoby/nodary/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Nodary is a local-first email heuristic analysis client. It connects to IMAP
-read-only and builds a behavioral profile of senders from message metadata and
-structure. All extraction, profiling, scoring, and display happen on the local
-machine. Nodary has no telemetry and makes no cloud or analysis-service calls.
+Nodary is a local-first email heuristic analysis client. It reads mail through
+read-only IMAP or the local Apple Mail store and builds a behavioral profile of
+senders from message metadata and structure. All extraction, profiling,
+scoring, and display happen on the local machine. Nodary has no telemetry and
+makes no cloud or analysis-service calls.
 
 Scores are deterministic weighted sums of named features. They describe how a
 message differs from known identity and behavior patterns; they are not a claim

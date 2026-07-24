@@ -383,7 +383,7 @@ def update_domain_incoming(
 def credit_reply(
     conn: sqlite3.Connection, thread_id: int, sender_id: int, initiated: bool
 ) -> bool:
-    """Credit a two-way interaction once per (thread, sender).
+    """Credit established correspondence once per (thread, sender).
     Returns True if this was a new credit."""
     cur = conn.execute(
         "INSERT INTO thread_reply_credits (thread_id, sender_id) VALUES (?,?)"

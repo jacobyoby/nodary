@@ -7,7 +7,7 @@ import sqlite3
 from ..feature_extraction.profiles import ProfileSnapshot
 
 TIER_LABELS = {
-    3: "established two-way correspondence",
+    3: "established",
     2: "prior one-way contact",
     1: "sender new, organization known",
     0: "never seen",

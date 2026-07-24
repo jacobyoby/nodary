@@ -1,339 +1,192 @@
-# Nodary — Design Proposal v0.1: Storage Schema & Feature Vector
+# Nodary Design
 
-Status: **historical proposal** — kept for design rationale. The implementation
-has since evolved past it; where they disagree, the code and
-`src/nodary/storage/schema.sql` are authoritative.
+Status: **current implementation, v0.3.0**. The database schema in
+`src/nodary/storage/schema.sql` is authoritative for table/column details.
 
-## 1. Privacy invariants the schema must uphold
+Nodary is a local-first, deterministic behavioral-analysis tool for BEC and
+phishing review. It builds sender baselines from local mailbox facts, scores
+incoming messages as a weighted sum of named features, and serves a
+localhost-only dashboard. It does not send mail, modify mailbox contents, call
+cloud scoring APIs, or emit telemetry.
 
-1. **No body text is ever persisted.** Bodies are streamed through a structural
-   parser that extracts only: URL hostnames, attachment MIME types/extensions,
-   and byte counts. The parse buffer is discarded per message.
-2. **No filenames, subjects, or recipient lists are stored** — only counts and
-   derived structural values. (Subject is not needed by any v1 feature.)
-3. **The database is encrypted at rest** with SQLCipher. The key is a random
-   256-bit value generated at first run, stored in the OS keychain (macOS
-   Keychain / freedesktop Secret Service / Windows Credential Manager via
-   `keyring`), never on disk. IMAP credentials/OAuth tokens also live only in
-   the keychain — the `accounts` table holds connection metadata only.
-4. **Everything derived is recomputable.** Aggregates (`sender_profiles`,
-   `domain_profiles`) are caches over the `messages` fact table; a
-   `nodary rebuild` command can regenerate them, which lets us change the
-   profile format without re-downloading mail.
+## Privacy Invariants
 
-All timestamps are UTC unix epoch seconds (`INTEGER`). All email addresses are
-stored normalized (§4).
+- Body text is transient. Text/plain and text/html parts are read only to
+  extract HTTP(S) link hostnames, then discarded.
+- Text parts larger than `MAX_TEXT_SCAN_BYTES` (1 MiB) are skipped for link
+  extraction and recorded with `messages.links_extracted = 0`.
+- Subjects, full URLs, attachment filenames, and full recipient lists are not
+  persisted.
+- Attachments are not downloaded by IMAP sync; `BODYSTRUCTURE` supplies MIME
+  type, size, and filename metadata, and only the derived extension is stored.
+- The Apple Mail store transport also avoids retaining attachment bytes; it
+  decodes only bounded scannable text parts and keeps other parts size-only.
+- Outgoing recipients are the documented exception to "no recipient lists":
+  `message_recipients` stores links from outgoing messages to sender/contact
+  rows so reply credits and Tier 3 are recomputable.
+- Credentials, OAuth access tokens, and the database key live in the OS
+  keychain. `NODARY_DB_KEY` is an override for tests/CI.
+- With the `sqlcipher` extra installed, storage uses SQLCipher; otherwise it
+  falls back to plain SQLite and records `schema_meta.encryption = none`.
+- Public Suffix List lookup uses `tldextract`'s bundled snapshot with runtime
+  fetching disabled. The freemail list and confusables subset are vendored in
+  `feature_extraction.normalize`.
 
-## 2. SQLite schema (SQLCipher)
+## Main Components
 
-```sql
-PRAGMA foreign_keys = ON;
+- `cli.py` provides `add-account`, `set-secret`, `set-source`, `sync`,
+  `rebuild`, and `ui`.
+- `imap_sync.client.ImapTransport` is the direct IMAP source. It selects
+  folders read-only and fetches `BODY.PEEK[HEADER]`, `RFC822.SIZE`, and
+  `BODYSTRUCTURE`.
+- `mail_store.MailStoreTransport` is the local Apple Mail source. It opens the
+  Envelope Index read-only, resolves `.emlx`/`.partial.emlx` files, and exposes
+  the same transport protocol as IMAP.
+- `imap_sync.sync` owns folder selection, UIDVALIDITY/high-water-mark sync,
+  bounded text-part fetch, direction detection, and handoff to the pipeline.
+- `feature_extraction.extract` converts headers plus structure/text snippets
+  into a `MessageRecord`.
+- `pipeline.py` persists facts, scores incoming mail against the prior sender
+  snapshot, updates profiles, credits outgoing correspondence, and rebuilds
+  derived tables.
+- `scoring.registry`, `scoring.engine`, and `scoring.tiers` define feature
+  weights, scoring behavior, and trust tiers.
+- `ui.server` exposes local JSON endpoints and renders the self-contained
+  dashboard page.
 
-CREATE TABLE schema_meta (          -- schema_version, engine_version, freemail_list_version
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
+## Sync Data Flow
 
--- ---------------------------------------------------------------- accounts --
-CREATE TABLE accounts (
-  id          INTEGER PRIMARY KEY,
-  email       TEXT NOT NULL UNIQUE,          -- the user's own primary address
-  imap_host   TEXT NOT NULL,
-  imap_port   INTEGER NOT NULL DEFAULT 993,
-  auth_method TEXT NOT NULL CHECK (auth_method IN ('oauth2','app_password')),
-  created_at  INTEGER NOT NULL
-  -- no secrets here: tokens/passwords live in the OS keychain,
-  -- keyed by "nodary/account/<id>"
-);
+1. `nodary sync` opens the local database, then processes each account.
+2. IMAP accounts authenticate with app password or a stored OAuth2 access
+   token. Mail-store accounts are matched to Apple Mail accounts by counting
+   messages sent from the account's primary identity, then aliases as fallback;
+   one store UUID can be claimed by only one nodary account per sync.
+3. The selected transport lists sync folders. Sent folders are processed before
+   inbox-like folders so outgoing relationship evidence exists before incoming
+   scoring during an initial backfill.
+4. Each folder stores `uidvalidity`, `last_seen_uid`, and `last_synced_at`.
+   A UIDVALIDITY change deletes facts for that folder, resets its high-water
+   mark, refetches, and triggers a full rebuild.
+5. Normal sync requests UIDs above `last_seen_uid` in batches of
+   `BATCH_SIZE = 200`. The high-water mark advances only through UIDs whose
+   metadata was actually available; this prevents Apple Mail index rows whose
+   `.emlx` files have not landed yet from being skipped forever.
+6. The sync layer parses headers, walks structure, fetches only bounded text
+   parts for link extraction, decides message direction, and calls
+   `pipeline.ingest_message`.
+7. A self-From message is outgoing only when it is in a sent folder or it is
+   self-sent without a DMARC failure. A self-From message with DMARC fail is
+   treated as incoming and scored.
 
-CREATE TABLE user_identities (      -- every address that counts as "me"
-  account_id INTEGER NOT NULL REFERENCES accounts(id),
-  email_norm TEXT NOT NULL,                  -- aliases, send-as addresses
-  PRIMARY KEY (account_id, email_norm)
-);
+## Storage Model
 
-CREATE TABLE folders (
-  id            INTEGER PRIMARY KEY,
-  account_id    INTEGER NOT NULL REFERENCES accounts(id),
-  name          TEXT NOT NULL,               -- IMAP mailbox name (UTF-7 decoded)
-  role          TEXT NOT NULL CHECK (role IN ('inbox','sent','archive','other')),
-  uidvalidity   INTEGER,                     -- NULL until first sync
-  last_seen_uid INTEGER NOT NULL DEFAULT 0,  -- high-water mark; fetch (last_seen_uid, *]
-  last_synced_at INTEGER,
-  UNIQUE (account_id, name)
-);
--- Incremental sync contract: if server UIDVALIDITY != folders.uidvalidity,
--- the folder's messages are invalidated and re-fetched (headers/structure only,
--- so even a full resync never re-downloads bodies beyond BODYSTRUCTURE + the
--- MIME parts needed for link extraction).
+`schema.sql` groups data into four classes:
 
--- ----------------------------------------------------------------- senders --
-CREATE TABLE senders (
-  id                  INTEGER PRIMARY KEY,
-  email_norm          TEXT NOT NULL UNIQUE,
-  domain              TEXT NOT NULL,         -- full domain part
-  reg_domain          TEXT NOT NULL,         -- registrable domain via Public Suffix List
-  reg_domain_skeleton TEXT NOT NULL,         -- UTS #39 confusable-skeleton of reg_domain
-  is_freemail         INTEGER NOT NULL DEFAULT 0,  -- gmail.com etc.; blocks Tier-1 propagation
-  first_seen_at       INTEGER,
-  last_seen_at        INTEGER
-);
-CREATE INDEX idx_senders_reg_domain ON senders(reg_domain);
-CREATE INDEX idx_senders_skeleton   ON senders(reg_domain_skeleton);
+- Account/source state: `accounts`, `user_identities`, and `folders`.
+  `accounts.auth_method` allows `oauth2`, `app_password`, and `mail_store`.
+- Facts: `senders`, `threads`, `messages`, `message_attachments`,
+  `message_link_domains`, and outgoing-only `message_recipients`.
+- Derived profiles: `sender_profiles`, `sender_display_names`,
+  `sender_attachment_types`, `sender_link_domains`, `sender_replyto_addrs`,
+  `thread_reply_credits`, and `domain_profiles`.
+- Scores: `message_scores` and `message_score_features`.
 
--- ---------------------------------------------------------------- messages --
--- One row per message in a synced folder, incoming AND outgoing (Sent folder
--- sync is mandatory: reply-rate and Tier 3 cannot be computed without it).
-CREATE TABLE threads (
-  id              INTEGER PRIMARY KEY,
-  root_message_id TEXT UNIQUE                -- earliest Message-ID observed in the chain
-);
+Derived tables are caches over message facts. `pipeline.rebuild()` deletes the
+derived tables and replays all messages ordered by `(sent_at, id)` so profiles,
+tiers, and scores are regenerated deterministically.
 
-CREATE TABLE messages (
-  id                  INTEGER PRIMARY KEY,
-  folder_id           INTEGER NOT NULL REFERENCES folders(id),
-  uid                 INTEGER NOT NULL,
-  message_id          TEXT,                  -- RFC 5322 Message-ID (nullable, not unique in the wild)
-  direction           TEXT NOT NULL CHECK (direction IN ('in','out')),
-  sender_id           INTEGER REFERENCES senders(id),  -- NULL when direction='out'
-  from_email_norm     TEXT NOT NULL,
-  from_display_name   TEXT,                  -- raw, as sent (needed for collision evidence)
-  reply_to_email_norm TEXT,                  -- NULL if absent or identical to From
-  to_me_directly      INTEGER NOT NULL DEFAULT 0,  -- a user identity appears in To (vs Cc/list)
-  n_recipients        INTEGER,
-  sent_at             INTEGER NOT NULL,      -- Date header → UTC
-  sent_hour_local     INTEGER,               -- 0-23 in the SENDER's own UTC offset (from Date hdr)
-  sent_dow_local      INTEGER,               -- 0-6, same clock
-  size_bytes          INTEGER NOT NULL,      -- RFC822.SIZE
-  n_attachments       INTEGER NOT NULL DEFAULT 0,
-  n_links             INTEGER NOT NULL DEFAULT 0,
-  is_reply            INTEGER NOT NULL DEFAULT 0,   -- has In-Reply-To
-  thread_id           INTEGER REFERENCES threads(id),
-  thread_depth        INTEGER NOT NULL DEFAULT 0,   -- position in reference chain
-  auth_spf            TEXT,                  -- 'pass'|'fail'|'softfail'|'none'|NULL
-  auth_dkim           TEXT,                  --   parsed from Authentication-Results
-  auth_dmarc          TEXT,                  --   (server-recorded; still purely local data)
-  UNIQUE (folder_id, uid)
-);
-CREATE INDEX idx_messages_sender ON messages(sender_id, sent_at);
-CREATE INDEX idx_messages_thread ON messages(thread_id);
+## Normalization
 
-CREATE TABLE message_attachments (  -- structure only; NO filename stored
-  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  mime_type  TEXT NOT NULL,                  -- from BODYSTRUCTURE
-  extension  TEXT,                           -- lowercased ext parsed from filename, then filename discarded
-  size_bytes INTEGER
-);
-CREATE INDEX idx_att_msg ON message_attachments(message_id);
+- Addresses are lowercased, `+tag` is stripped, and Gmail-family local-part
+  dots are removed.
+- Registrable domains come from the bundled `tldextract` Public Suffix List
+  snapshot.
+- Display names and registrable domains are casefolded through a small
+  vendored UTS #39-style confusables table, plus common digit substitutions.
+- Sender-local hour/day come from the UTC offset carried in the `Date` header,
+  so behavioral baselines follow the sender's clock rather than the user's.
+- Authentication verdicts are parsed from the receiving server's
+  `Authentication-Results` header.
 
-CREATE TABLE message_link_domains ( -- hostnames only; full URLs are never stored
-  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  reg_domain TEXT NOT NULL,
-  n          INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (message_id, reg_domain)
-);
+## Pipeline Semantics
 
--- --------------------------------------------------- derived: sender profile --
--- Incrementally maintained on ingest; fully recomputable from messages.
-CREATE TABLE sender_profiles (
-  sender_id           INTEGER PRIMARY KEY REFERENCES senders(id),
-  n_messages          INTEGER NOT NULL DEFAULT 0,
-  n_threads           INTEGER NOT NULL DEFAULT 0,
-  n_replied_threads   INTEGER NOT NULL DEFAULT 0,  -- threads where the user replied to this sender
-  n_user_initiated    INTEGER NOT NULL DEFAULT 0,  -- threads the user started
-  trust_tier          INTEGER NOT NULL DEFAULT 0,  -- 0..3, see §5
-  hour_histogram      BLOB NOT NULL,        -- 24 × uint32 LE, sender-local clock
-  dow_histogram       BLOB NOT NULL,        -- 7 × uint32 LE
-  log_size_mean       REAL,                 -- Welford running mean of ln(size_bytes)
-  log_size_m2         REAL,                 -- Welford M2 (→ variance)
-  links_mean          REAL,
-  links_m2            REAL,
-  n_with_attachments  INTEGER NOT NULL DEFAULT 0,
-  n_with_links        INTEGER NOT NULL DEFAULT 0,
-  n_replyto_divergent INTEGER NOT NULL DEFAULT 0,  -- msgs where Reply-To reg_domain ≠ From reg_domain
-  median_gap_seconds  REAL,                 -- typical inter-arrival time (P² estimator)
-  max_thread_depth    INTEGER NOT NULL DEFAULT 0,
-  updated_at          INTEGER NOT NULL,
-  profile_version     INTEGER NOT NULL      -- bump forces rebuild
-);
+Incoming messages:
 
-CREATE TABLE sender_display_names (
-  sender_id      INTEGER NOT NULL REFERENCES senders(id),
-  name_norm      TEXT NOT NULL,             -- casefolded, whitespace-collapsed
-  name_skeleton  TEXT NOT NULL,             -- UTS #39 skeleton (homoglyph-folded)
-  n              INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (sender_id, name_norm)
-);
-CREATE INDEX idx_names_skeleton ON sender_display_names(name_skeleton);
+1. Resolve or create a thread using `In-Reply-To` and `References`.
+2. Upsert the sender row.
+3. Insert the message fact rows.
+4. Load the sender profile snapshot as it existed before this message.
+5. Compute the current trust tier from that snapshot.
+6. Store score and feature rows.
+7. Update sender/domain profiles and store the sender's new tier.
 
-CREATE TABLE sender_attachment_types (
-  sender_id  INTEGER NOT NULL REFERENCES senders(id),
-  extension  TEXT NOT NULL,                 -- '' when only MIME known
-  mime_type  TEXT NOT NULL,
-  n          INTEGER NOT NULL DEFAULT 1,
-  first_seen_at INTEGER NOT NULL,
-  PRIMARY KEY (sender_id, extension, mime_type)
-);
+Outgoing messages:
 
-CREATE TABLE sender_link_domains (
-  sender_id  INTEGER NOT NULL REFERENCES senders(id),
-  reg_domain TEXT NOT NULL,
-  n          INTEGER NOT NULL DEFAULT 1,
-  first_seen_at INTEGER NOT NULL,
-  PRIMARY KEY (sender_id, reg_domain)
-);
+1. Insert the outgoing message fact row.
+2. Upsert each normalized recipient as a sender/contact and store
+   `message_recipients`.
+3. Credit replied threads for prior incoming senders in the same thread.
+4. Credit user-initiated threads for recipients not already represented by
+   prior incoming messages in that thread.
+5. Recompute tiers for credited senders.
 
-CREATE TABLE sender_replyto_addrs (
-  sender_id  INTEGER NOT NULL REFERENCES senders(id),
-  email_norm TEXT NOT NULL,
-  n          INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (sender_id, email_norm)
-);
+This ordering matters: incoming scoring always evaluates a message against the
+baseline before that message contributed to the profile.
 
--- ---------------------------------------------------- derived: domain graph --
-CREATE TABLE domain_profiles (
-  reg_domain        TEXT PRIMARY KEY,
-  n_senders         INTEGER NOT NULL DEFAULT 0,
-  n_messages        INTEGER NOT NULL DEFAULT 0,
-  n_replied_threads INTEGER NOT NULL DEFAULT 0,
-  is_freemail       INTEGER NOT NULL DEFAULT 0,
-  first_seen_at     INTEGER,
-  last_seen_at      INTEGER
-);
+## Trust Tiers
 
--- ------------------------------------------------------------------ scoring --
-CREATE TABLE message_scores (
-  message_id            INTEGER PRIMARY KEY REFERENCES messages(id),
-  engine_version        TEXT NOT NULL,      -- feature registry + weights version
-  trust_tier_at_scoring INTEGER NOT NULL,   -- tier can change later; keep what UI showed
-  baseline_n            INTEGER NOT NULL,   -- profile size the score was judged against
-  anomaly_score         REAL NOT NULL,      -- 0..100, capped weighted sum
-  scored_at             INTEGER NOT NULL
-);
+Trust tiers are computed, not manually assigned. The first matching rule wins:
 
-CREATE TABLE message_score_features (       -- full decomposition = the explanation
-  message_id   INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  feature      TEXT NOT NULL,               -- registry name (§6)
-  raw_value    REAL NOT NULL,               -- normalized 0..1
-  weight       REAL NOT NULL,               -- points at raw_value = 1.0
-  contribution REAL NOT NULL,               -- raw_value × weight
-  explanation  TEXT NOT NULL,               -- rendered template, e.g.
-                                            -- "first .zip attachment in 214 messages from this sender"
-  PRIMARY KEY (message_id, feature)
-);
-```
+| Tier | Rule | Label |
+|---:|---|---|
+| 3 | `n_replied_threads >= 1` or `n_user_initiated >= 1` | established |
+| 2 | At least 2 messages spanning at least 7 days, with no user reply/initiated thread | prior one-way contact |
+| 1 | New sender, same non-freemail registrable domain as a domain with at least one replied thread | sender new, organization known |
+| 0 | Everything else | never seen |
 
-## 3. What gets read from the server (and what doesn't)
+Freemail domains never propagate Tier 1 to unrelated senders.
 
-Per message the sync engine fetches: `UID`, `RFC822.SIZE`, `BODYSTRUCTURE`,
-`FLAGS`, and header fields `From To Cc Date Message-ID In-Reply-To References
-Reply-To Authentication-Results Content-Type`. Text parts are fetched **only**
-to run URL-hostname extraction, then dropped; `text/*` parts over 1 MiB are
-skipped (link stats marked "not extracted"). Attachments are never fetched —
-`BODYSTRUCTURE` already carries MIME type, size, and filename (we keep only
-the extension).
+## Scoring
 
-## 4. Normalization rules (deterministic, versioned)
+The scoring registry is `src/nodary/scoring/registry.py`.
+`ENGINE_VERSION = "1.0.0"` is stored on each score. Each feature returns a raw
+value in `[0, 1]`; contribution is `raw * weight`; total score is capped at
+100. Features are monotone, so normal-looking behavior never subtracts points
+from another warning.
 
-- **Address:** casefold; strip `+tag`; for Gmail-family domains also strip
-  dots in the local part. Raw From is preserved on the message row.
-- **Registrable domain:** Public Suffix List (vendored snapshot, versioned in
-  `schema_meta` — no runtime fetch).
-- **Skeleton:** Unicode UTS #39 confusables skeleton, applied to display names
-  and reg_domains. `paypaІ.com` (Cyrillic І) and `paypal.com` collide in
-  skeleton space; that collision *is* the lookalike signal.
-- **Sender-local time:** the Date header carries the sender's UTC offset —
-  `sent_hour_local` uses *their* clock, so "hours they never write" tracks the
-  human, not our timezone.
+Identity/spoofing features apply at all tiers:
 
-## 5. Trust tiers (computed, never manually set in v1)
+| Feature | Weight | Current behavior |
+|---|---:|---|
+| `lookalike_domain` | 25 | Fires when an untrusted non-own sender domain skeleton-collides with, or is edit-distance 1/2 from, a trusted non-freemail Tier >= 2 domain. |
+| `display_name_collision` | 25 | Fires when a display-name skeleton matches a Tier 3 contact's name and the sender differs. |
+| `auth_fail` | 15 | DMARC fail = 1.0; DKIM fail plus SPF fail/softfail = 0.8; SPF softfail = 0.4. |
+| `reply_to_divergence` | 10 | For Tier >= 2 senders, fires when Reply-To uses a different registrable domain and the sender has not used that Reply-To before. |
+| `embedded_addr_mismatch` | 10 | Fires when the display name contains an email-like token whose domain differs from the sender domain. |
 
-| Tier | Rule (first match wins, evaluated top-down) |
-|------|---------------------------------------------|
-| 3 | `n_replied_threads ≥ 1` OR `n_user_initiated ≥ 1` — established two-way correspondence |
-| 2 | `n_messages ≥ 2` over ≥ 7 days, no reply from user — prior one-way contact |
-| 1 | sender new, but `domain_profiles[reg_domain].n_replied_threads ≥ 1` AND NOT freemail — the *organization* is known |
-| 0 | everything else |
+Behavioral features apply only when `tier >= 2` and `baseline_n >= 8`.
+Novelty signals use `confidence(n) = n / (n + 10)`:
 
-Freemail exclusion is load-bearing: `random@gmail.com` must not inherit Tier 1
-because you correspond with someone else at gmail.com. Shipped as a vendored
-static list (~200 domains), versioned.
+| Feature | Weight | Current behavior |
+|---|---:|---|
+| `attachment_type_novelty` | 15 | Fires for extension/MIME pairs not seen from this sender. |
+| `first_attachment_ever` | 10 | Fires instead of attachment-type novelty when the sender previously had no attachments. |
+| `link_domain_novelty` | 10 | Fires on the fraction of message link domains not seen from this sender, only when link extraction completed. |
+| `send_hour_anomaly` | 8 | Uses Laplace-smoothed sender-local hour history and `max(0, 1 - p * 24)`. |
+| `link_density_anomaly` | 5 | One-sided z-score for unusually many links, clamped from z=2 to z=6. |
+| `size_anomaly` | 5 | Two-sided z-score on log message size, clamped from z=2.5 to z=6.5. |
+| `dormant_resurrection` | 5 | Fires only alongside another flag when the gap is at least 90 days and more than 6x the sender's median prior gap. The median is computed from facts on demand. |
 
-## 6. Feature vector
+Cold-contact features apply only when `tier <= 1` and `baseline_n < 8`.
+They run at full strength for a first-ever sender and half strength for a
+barely known sender:
 
-Every feature: deterministic, normalized to **[0, 1]**, with a named weight
-(points contributed at 1.0) and an explanation template. Score =
-`min(100, Σ raw×weight)`. Weights live in one versioned registry module —
-changing any weight bumps `engine_version`.
+| Feature | Weight | Current behavior |
+|---|---:|---|
+| `cold_attachment` | 12 | Attachment from a never-seen or barely known sender. |
+| `cold_links` | 6 | One or more links from a never-seen or barely known sender. |
+| `cold_replyto` | 8 | Divergent Reply-To from a never-seen or barely known sender. |
 
-**Confidence gate:** behavioral features are meaningless against thin
-baselines. Each novelty feature is multiplied by `conf(n) = n / (n + 10)`, so
-"first attachment in 214 messages" ≈ full strength (0.96) while "first
-attachment in 4 messages" is nearly muted (0.29). Group B features emit 0 with
-explanation "baseline too small (n)" when `n_messages < 8`.
-
-### Group A — identity & spoofing (all tiers)
-
-| feature | weight | fires when | explanation template |
-|---|---|---|---|
-| `lookalike_domain` | 25 | sender reg_domain ≠ but skeleton-collides with (or is Damerau-Levenshtein ≤ 2 from, min length 6) a Tier ≥ 2 domain | "domain ‹micros0ft.com› resembles known domain ‹microsoft.com›" |
-| `display_name_collision` | 25 | display-name skeleton matches a name used by a Tier 3 contact, but address differs | "display name matches ‹Dana Ito ‹dana@acme.com›› but address is ‹dana.ito@mail-acme.net›" |
-| `auth_fail` | 15 | DMARC fail (1.0) / DKIM+SPF both fail (0.8) / softfail (0.4), from Authentication-Results | "DMARC failed for sending domain" |
-| `reply_to_divergence` | 10 | Reply-To reg_domain ≠ From reg_domain AND sender has never used this Reply-To before | "replies redirect to ‹collect@other-domain.ru›, never seen from this sender" |
-| `embedded_addr_mismatch` | 10 | display name contains an email-like token whose domain ≠ From domain | "display name shows ‹ceo@acme.com› but real sender is ‹x@evil.net›" |
-
-### Group B — behavioral shift vs sender's own baseline (Tier ≥ 2, n ≥ 8)
-
-| feature | weight | raw value | explanation template |
-|---|---|---|---|
-| `attachment_type_novelty` | 15 | 1.0 × conf(n) if extension/MIME pair never seen from sender | "first ‹.zip› from this sender in 214 messages" |
-| `first_attachment_ever` | 10 | 1.0 × conf(n) if sender's attachment count was 0 (subsumes `attachment_type_novelty`: only the larger fires) | "first attachment of any kind in 214 messages" |
-| `link_domain_novelty` | 10 | (novel link domains ÷ link domains in msg) × conf(n) | "links to ‹dropbox-files.net›, never linked before (0 of 87 prior link domains)" |
-| `send_hour_anomaly` | 8 | surprisal of hour bucket under Laplace-smoothed histogram, scaled: `max(0, 1 − p·24)` clamped | "sent at 03:00 sender-local; 0 of 214 prior messages in 02:00–05:00" |
-| `link_density_anomaly` | 5 | `clamp((z − 2) / 4)` where z = links z-score | "14 links; sender's typical is 0.4 ± 0.9" |
-| `size_anomaly` | 5 | `clamp((|z| − 2.5) / 4)` on ln(size) | "412 KB message; sender's typical is 6 KB" |
-| `dormant_resurrection` | 5 | gap > 6 × median_gap AND ≥ 90 days, only when any other Group A/B feature fired | "first message in 14 months, combined with other anomalies" |
-
-### Group C — cold-contact context (Tier 0–1 only; these contextualize, not accuse)
-
-| feature | weight | fires when | explanation template |
-|---|---|---|---|
-| `cold_attachment` | 12 | first-ever message includes an attachment | "attachment from a never-seen sender" |
-| `cold_links` | 6 | first-ever message includes ≥ 1 link | "3 links from a never-seen sender" |
-| `cold_replyto` | 8 | first-ever message sets divergent Reply-To | "never-seen sender redirects replies elsewhere" |
-
-Group A and C can co-fire (a lookalike cold sender with an attachment stacks
-to ~62 points). Group B never fires for Tier 0/1 — there is no baseline to
-betray. The dashboard sorts by `(trust_tier ASC is *not* used directly)` — it
-buckets by tier, then orders by anomaly score descending within bucket, so a
-Tier 3 contact behaving strangely surfaces above routine Tier 0 newsletters.
-
-## 7. Scoring properties worth stating
-
-- **Deterministic:** same message + same profile state → same score, bit-for-bit.
-  Tests assert this.
-- **Explainable by construction:** the score *is* the sum of
-  `message_score_features` rows; the UI renders those rows verbatim. There is
-  no hidden term.
-- **Monotone:** no feature can lower a score. Absence of anomaly = 0 points,
-  not negative points (prevents attackers from *buying* trust by looking extra
-  normal in some dimension).
-- **Order-independent-ish:** profiles are built from history *before* the
-  scored message; rescoring after a full resync yields identical results
-  because messages are replayed in `sent_at` order during profile rebuild.
-
-## 8. Open questions for review
-
-1. **Freemail Tier-1 blocking** (§5) — agreed? Alternative: allow Tier 1 for
-   freemail only on exact local-part similarity, but that adds complexity for
-   marginal benefit.
-2. **Baseline thresholds** — `n ≥ 8` to activate Group B, `conf(n) = n/(n+10)`.
-   Tunable constants in the registry; are these starting points acceptable?
-3. **SQLCipher via `sqlcipher3-wheels`** (bundled binary) vs `pysqlcipher3`
-   (build from source). Proposal: `sqlcipher3-wheels` for install ergonomics;
-   key from OS keychain via `keyring`.
-4. **Sent-folder sync is mandatory** for Tier 3 / reply-rate. If a provider
-   blocks it, senders cap at Tier 2 and the UI says why. OK?
-5. **Large text parts** (> 1 MiB) skip link extraction (§3) to keep sync fast
-   on 100k mailboxes. The message is marked `links not extracted` rather than
-   silently scoring 0 link features. OK?
+The dashboard orders incoming messages by anomaly score descending, then
+`sent_at` descending. Tier filtering is available, but tier is not used as the
+primary sort key.
