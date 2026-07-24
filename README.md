@@ -165,6 +165,14 @@ Recompute all derived profiles, tiers, and scores from locally stored facts:
 uv run nodary rebuild
 ```
 
+Replay the bundled labeled calibration corpus through the real scoring pipeline
+and print score distributions, feature firing rates, and threshold separation:
+
+```sh
+uv run nodary calibrate
+uv run python -m nodary.calibration
+```
+
 Start the local dashboard at `https://127.0.0.1:8321/`:
 
 ```sh

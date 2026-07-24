@@ -31,6 +31,9 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 - [x] `accounts.auth_method` supports `mail_store` for new databases and has an
       in-place widening migration for older databases. Why: source switching
       should not require recreating the local database.
+- [x] Weight calibration harness that replays a labeled mailbox and reports
+      score distributions per tier. Why: deterministic weights now have an
+      offline empirical harness using synthetic benign and malicious scenarios.
 
 ## Near-Term / Hardening
 
@@ -53,9 +56,6 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 - [ ] Message deletion reconciliation for UIDs that vanish server-side. Why:
       retaining local facts is correct for baselines, but deleted/server-missing
       messages should be marked so sync status is understandable.
-- [ ] Weight calibration harness that replays a labeled mailbox and reports
-      score distributions per tier. Why: weights are deterministic but need
-      empirical tuning against realistic benign and malicious examples.
 - [ ] Mail-store portability checks for Apple Mail layouts beyond verified V10.
       Why: `mail_store.store` currently assumes the V10 layout and should fail
       clearly or support newer layouts when macOS changes them.

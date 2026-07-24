@@ -178,6 +178,13 @@ def cmd_rebuild(args) -> int:
     return 0
 
 
+def cmd_calibrate(args) -> int:
+    from .calibration import render_markdown, run_calibration
+
+    print(render_markdown(run_calibration()), end="")
+    return 0
+
+
 def cmd_ui(args) -> int:
     from .ui import run
 
@@ -226,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
 
     r = sub.add_parser("rebuild", help="recompute all profiles/tiers/scores from facts")
     r.set_defaults(fn=cmd_rebuild)
+
+    k = sub.add_parser(
+        "calibrate",
+        help="replay the bundled labeled corpus and report score distributions",
+    )
+    k.set_defaults(fn=cmd_calibrate)
 
     u = sub.add_parser("ui", help="serve the local dashboard (127.0.0.1)")
     u.add_argument("--port", type=int, default=8321)
