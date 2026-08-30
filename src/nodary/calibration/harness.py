@@ -332,7 +332,9 @@ class SyntheticCorpusSource:
                 message_id=box.message_id("sam-takeover"),
                 body="urgent - wire details changed, see attached and confirm at "
                 "https://secure-docs-verify.net/login",
-                attachments=[("payment_details.zip", "application/zip", b"PK\x03\x04x")],
+                attachments=[
+                    ("payment_details.zip", "application/zip", b"PK\x03\x04x")
+                ],
                 reply_to="sam.okafor@consultant-mail.net",
             ),
             label="malicious",
@@ -444,12 +446,18 @@ class SyntheticCorpusSource:
             ),
         ]
         auth_fail = (
-            "mx.myco.com; spf=fail smtp.mailfrom=bank-alerts.com; "
-            "dkim=fail; dmarc=fail"
+            "mx.myco.com; spf=fail smtp.mailfrom=bank-alerts.com; dkim=fail; dmarc=fail"
         )
-        for i, (addr, display, body, attachments, reply_to, label, subtype, scenario) in enumerate(
-            cold_cases
-        ):
+        for i, (
+            addr,
+            display,
+            body,
+            attachments,
+            reply_to,
+            label,
+            subtype,
+            scenario,
+        ) in enumerate(cold_cases):
             box.deliver(
                 make_email(
                     addr,
@@ -686,7 +694,9 @@ def _choose_headline(rows: tuple[ThresholdRow, ...]) -> ThresholdRow:
     low_fp = [r for r in rows if r.false_positive_rate <= 0.05]
     if low_fp:
         return max(low_fp, key=lambda r: (r.true_positive_rate, -r.threshold))
-    return max(rows, key=lambda r: (r.true_positive_rate - r.false_positive_rate, -r.threshold))
+    return max(
+        rows, key=lambda r: (r.true_positive_rate - r.false_positive_rate, -r.threshold)
+    )
 
 
 def _render_headline(result: CalibrationResult) -> str:
