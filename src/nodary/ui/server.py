@@ -39,12 +39,19 @@ def create_app(conn: sqlite3.Connection) -> Flask:
 
     @app.get("/api/messages")
     def messages():
-        limit = min(int(request.args.get("limit", 200)), 1000)
+        try:
+            limit = max(1, min(int(request.args.get("limit", 200)), 1000))
+        except ValueError:
+            limit = 200
         tier = request.args.get("tier")
         where, params = "", []
         if tier is not None:
-            where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
-            params.append(int(tier))
+            try:
+                params.append(int(tier))
+            except ValueError:
+                pass  # malformed tier filter: serve unfiltered
+            else:
+                where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
         rows = conn.execute(
             f"""SELECT m.id, m.message_id, m.from_email_norm,
                   m.from_display_name, m.sent_at,

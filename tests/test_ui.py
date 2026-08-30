@@ -53,6 +53,13 @@ def test_messages_tier_filter(client, mailbox):
     assert tiers == {0}
 
 
+def test_messages_bad_params_fall_back_to_defaults(client, mailbox):
+    mailbox.deliver(make_email("a@example.com"))
+    assert client.get("/api/messages?limit=abc").status_code == 200
+    assert client.get("/api/messages?limit=-5").status_code == 200
+    assert client.get("/api/messages?tier=zzz").status_code == 200
+
+
 def test_sender_endpoint(client, mailbox):
     mailbox.deliver(make_email("a@example.com"))
     assert client.get("/api/senders/1").status_code == 200
