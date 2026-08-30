@@ -46,7 +46,7 @@ Identity and spoofing features apply to all tiers:
 | `lookalike_domain` | 25 | Detects registrable domains that resemble a trusted non-freemail domain through a Unicode confusable skeleton or small edit distance. This targets lookalike-domain phishing. |
 | `display_name_collision` | 25 | Detects a display name matching a Tier 3 contact when the address differs. This targets direct impersonation of trusted people. |
 | `auth_fail` | 15 | Uses receiving-server SPF, DKIM, and DMARC results as evidence that the sender identity may be forged. |
-| `reply_to_divergence` | 10 | Flags an established sender redirecting replies to a different domain or an address not previously used. This catches account or identity abuse that moves the conversation elsewhere. |
+| `reply_to_divergence` | 10 | Flags an established sender redirecting replies to an address in a different registrable domain that they have not used before. This catches account or identity abuse that moves the conversation elsewhere. |
 | `embedded_addr_mismatch` | 10 | Flags an email address written in the display name when its domain differs from the actual From domain. This catches attempts to present a trusted address while sending from another one. |
 
 Behavioral features apply only to Tier 2 and Tier 3 senders with at least eight
@@ -63,9 +63,11 @@ larger history provides stronger evidence.
 | `size_anomaly` | 5 | Detects message size far outside the sender's log-size baseline. Large or small structural changes can accompany a new payload or changed sending process. |
 | `dormant_resurrection` | 5 | Adds context when a contact returns after at least 90 days and more than six times their typical gap, but only alongside another identity or behavioral flag. Dormant relationships are useful cover for compromised-contact attacks. |
 
-Cold-contact features apply only to Tier 0 and Tier 1 senders. They provide
-context for first or barely established contact; they do not by themselves
-assert malicious intent.
+Cold-contact features apply only to Tier 0 and Tier 1 senders with fewer than
+eight prior messages. They provide context for first or barely established
+contact; they do not by themselves assert malicious intent. A Tier 0/1 sender
+with eight or more messages receives identity features only (behavioral
+features require Tier 2+).
 
 | Feature | Weight | Why it exists |
 |---|---:|---|
