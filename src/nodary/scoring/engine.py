@@ -65,7 +65,8 @@ def _trusted_domains(conn: sqlite3.Connection, exclude_rd: str) -> list[sqlite3.
         """SELECT DISTINCT s.reg_domain, s.reg_domain_skeleton
            FROM senders s JOIN sender_profiles p ON p.sender_id = s.id
            WHERE p.trust_tier >= 2 AND s.is_freemail = 0
-             AND s.reg_domain != ?""",
+             AND s.reg_domain != ?
+           ORDER BY s.reg_domain""",
         (exclude_rd,),
     ).fetchall()
 
@@ -117,7 +118,8 @@ def _identity_features(
                    JOIN sender_profiles p ON p.sender_id = dn.sender_id
                    JOIN senders s ON s.id = dn.sender_id
                    WHERE dn.name_skeleton = ? AND p.trust_tier = 3
-                     AND dn.sender_id != ? LIMIT 1""",
+                     AND dn.sender_id != ?
+                   ORDER BY s.email_norm LIMIT 1""",
                 (skeleton(name_norm), snap.sender_id),
             ).fetchone()
             if hit:
