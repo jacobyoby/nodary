@@ -16,6 +16,8 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 - Automatic in-place migration widens the `accounts.auth_method` CHECK on
   databases created before `mail_store` existed.
 - README documents all environment variables.
+- `nodary status` command showing per-account folders with high-water marks,
+  last sync time, engine version, and database encryption state.
 
 ### Fixed
 - Duplicate suppression: a message whose Message-ID, size, and date match an

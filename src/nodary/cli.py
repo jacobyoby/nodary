@@ -178,6 +178,44 @@ def cmd_rebuild(args) -> int:
     return 0
 
 
+def cmd_status(args) -> int:
+    from .scoring.registry import ENGINE_VERSION
+
+    conn = _open()
+    encryption = storage_db.get_meta(conn, "encryption") or "unknown"
+    print(f"engine v{ENGINE_VERSION} | db encryption: {encryption}")
+    accounts = conn.execute("SELECT * FROM accounts ORDER BY id").fetchall()
+    if not accounts:
+        print("no accounts. run: nodary add-account")
+        return 1
+    for acct in accounts:
+        print(f"account #{acct['id']} {acct['email']} [{acct['auth_method']}]")
+        rows = conn.execute(
+            "SELECT name, role, uidvalidity, last_seen_uid, last_synced_at"
+            " FROM folders WHERE account_id = ? ORDER BY id",
+            (acct["id"],),
+        ).fetchall()
+        if not rows:
+            print("  no folders synced yet")
+        for f in rows:
+            synced = (
+                time.strftime("%Y-%m-%d %H:%M", time.localtime(f["last_synced_at"]))
+                if f["last_synced_at"]
+                else "never"
+            )
+            print(
+                f"  {f['name']} ({f['role']}): uidvalidity={f['uidvalidity']},"
+                f" last_seen_uid={f['last_seen_uid']}, last_synced={synced}"
+            )
+    n_msgs = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    n_in = conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE direction = 'in'"
+    ).fetchone()[0]
+    n_senders = conn.execute("SELECT COUNT(*) FROM senders").fetchone()[0]
+    print(f"messages: {n_msgs} ({n_in} incoming) | senders: {n_senders}")
+    return 0
+
+
 def cmd_calibrate(args) -> int:
     from .calibration import render_markdown, run_calibration
 
@@ -233,6 +271,11 @@ def main(argv: list[str] | None = None) -> int:
 
     r = sub.add_parser("rebuild", help="recompute all profiles/tiers/scores from facts")
     r.set_defaults(fn=cmd_rebuild)
+
+    t = sub.add_parser(
+        "status", help="show accounts, folder sync state, engine version, encryption"
+    )
+    t.set_defaults(fn=cmd_status)
 
     k = sub.add_parser(
         "calibrate",

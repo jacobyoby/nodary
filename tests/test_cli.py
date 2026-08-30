@@ -73,6 +73,32 @@ def test_set_source_clears_stale_facts(env, monkeypatch, store, capsys):  # noqa
     assert conn.execute("SELECT MAX(last_seen_uid) FROM folders").fetchone()[0] == 0
 
 
+def test_status_reports_accounts_folders_and_db(env, monkeypatch, capsys):
+    assert _add_account(monkeypatch) == 0
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "jacob@example.com" in out
+    assert "engine v" in out
+    assert "db encryption:" in out
+    assert "no folders synced yet" in out
+
+    from nodary.cli import _open
+
+    conn = _open()
+    conn.execute(
+        "INSERT INTO folders (account_id, name, role, uidvalidity,"
+        " last_seen_uid, last_synced_at) VALUES (1, 'INBOX', 'inbox', 7, 42,"
+        " 1700000000)"
+    )
+    conn.commit()
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "INBOX (inbox)" in out
+    assert "uidvalidity=7" in out
+    assert "last_seen_uid=42" in out
+    assert "messages: 0" in out
+
+
 def test_shared_alias_cannot_bind_two_accounts_to_one_store(
     env,
     monkeypatch,
