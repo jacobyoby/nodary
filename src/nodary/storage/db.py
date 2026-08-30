@@ -47,6 +47,13 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
     `key` is the hex key for SQLCipher; ignored (with a warning) when
     SQLCipher is unavailable.
     """
+    if key is not None:
+        try:
+            if len(bytes.fromhex(key)) != 32:
+                raise ValueError
+        except ValueError as e:
+            raise ValueError("database key must be 64 hex characters") from e
+
     path = Path(path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,12 +80,24 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
                 file=sys.stderr,
             )
 
+    if str(path) != ":memory:":
+        # owner-only regardless of umask: the plain fallback is plaintext PII
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
+
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(_load_schema())
     _migrate(conn)
     _set_meta_default(conn, "schema_version", SCHEMA_VERSION)
-    _set_meta_default(conn, "encryption", encryption)
+    # encryption reflects the mode in use right now, not creation time: a DB
+    # created before the sqlcipher extra was installed would otherwise report
+    # a stale 'none' forever
+    conn.execute(
+        "INSERT INTO schema_meta (key, value) VALUES ('encryption', ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (encryption,),
+    )
     _set_meta_default(conn, "created_at", str(int(time.time())))
     conn.commit()
     return conn
