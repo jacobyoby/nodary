@@ -18,6 +18,11 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 - README documents all environment variables.
 
 ### Fixed
+- Duplicate suppression: a message whose Message-ID, size, and date match an
+  already-synced message is no longer ingested again. This drops
+  double-delivered copies and the same delivery reaching two synced accounts
+  (forwarding), which previously inflated sender baselines and cluttered the
+  dashboard.
 - **Security:** self-From alone no longer bypasses scoring. A spoofed message
   using the user's own address that fails DMARC is classified incoming and
   scored; genuine self-sent copies (no verdict, or pass) stay outgoing.

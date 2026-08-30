@@ -27,10 +27,35 @@ from .scoring.engine import score_message
 from .scoring.tiers import compute_tier, store_tier
 
 
+def _existing_duplicate(conn: sqlite3.Connection, record: MessageRecord) -> int | None:
+    """Row id of an already-ingested copy of this message, if any.
+
+    Redundant copies arrive two ways: the same message delivered twice into
+    one folder, and one delivery reaching two synced accounts (forwarding).
+    Message-ID alone is unsafe (mailing lists reuse IDs), so a row counts as
+    a copy only when date and size also match.
+    """
+    if not record.message_id:
+        return None
+    row = conn.execute(
+        "SELECT id FROM messages WHERE message_id = ? AND sent_at = ?"
+        " AND size_bytes = ? LIMIT 1",
+        (record.message_id, record.sent_at, record.size_bytes),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def ingest_message(
     conn: sqlite3.Connection, folder_id: int, uid: int, record: MessageRecord
 ) -> int:
-    """Persist one new message and apply all derived updates + scoring."""
+    """Persist one new message and apply all derived updates + scoring.
+
+    Returns the new message row id, or the existing row id when the message
+    was already ingested (duplicate delivery / forwarded copy).
+    """
+    dup_id = _existing_duplicate(conn, record)
+    if dup_id is not None:
+        return dup_id
     thread_id, depth = resolve_thread(conn, record)
     if record.direction == "in":
         sender_id = upsert_sender(conn, record.from_email_norm, record.sent_at)
