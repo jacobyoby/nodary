@@ -109,15 +109,24 @@ def test_sent_folder_gives_two_way_tier(conn):
 
 def test_direction_uses_normalized_addresses(conn):
     """A dotted-gmail identity must match its dotless normalized form (and
-    vice versa): direction detection compares normalized, not raw substrings."""
+    vice versa): direction detection compares normalized, not raw substrings.
+    The self-From copies carry a non-failing AR stamp so they may stay
+    outgoing at all."""
     conn.execute(
         "INSERT INTO user_identities (account_id, email_norm) VALUES (1, ?)",
         ("jacob.e.durham@gmail.com",),
     )
     conn.commit()
+    stamped = "mx.example.com; spf=pass; dmarc=pass"
     t = FakeTransport()
-    t.add("INBOX", make_email("Jacob.E.Durham@gmail.com", display="Jacob"))
-    t.add("INBOX", make_email("jacobedurham@gmail.com", display="Jacob"))
+    t.add(
+        "INBOX",
+        make_email("Jacob.E.Durham@gmail.com", display="Jacob", auth_results=stamped),
+    )
+    t.add(
+        "INBOX",
+        make_email("jacobedurham@gmail.com", display="Jacob", auth_results=stamped),
+    )
     t.add("INBOX", make_email("dana@acme-corp.com"))
     sync_account(conn, t, account_id=1)
     rows = conn.execute(
@@ -128,25 +137,55 @@ def test_direction_uses_normalized_addresses(conn):
     assert dirs["dana@acme-corp.com"] == "in"
 
 
-def test_spoofed_self_from_is_scored_as_incoming(conn):
-    """A message spoofing the user's own From that fails DMARC must stay
-    'in' (and get scored) — self-From alone is not proof of authorship."""
+def test_self_from_classification_needs_a_verdict_or_sent_folder(conn):
+    """Self-From mail is outgoing only from the Sent folder or when a
+    receiving server stamped Authentication-Results without a DMARC failure.
+    No verdict at all is the spoofing blind spot and must be scored."""
     t = FakeTransport()
+    t.add(
+        "INBOX",
+        make_email(ME, display="Jacob", message_id="<self-1@test>"),
+    )  # no verdict: score it
     t.add(
         "INBOX",
         make_email(
             ME,
             display="Jacob",
+            message_id="<self-2@test>",
             auth_results="mx.example.com; spf=fail; dmarc=fail",
         ),
+    )  # DMARC fail: score it
+    t.add(
+        "INBOX",
+        make_email(
+            ME,
+            display="Jacob",
+            message_id="<self-3@test>",
+            auth_results="mx.example.com; spf=pass; dmarc=pass",
+        ),
+    )  # stamped and not failing: genuine self-sent copy
+    t.add(
+        "Sent",
+        make_email(
+            ME,
+            to="dana@acme-corp.com",
+            when=T0 + timedelta(hours=1),
+            message_id="<self-4@test>",
+        ),
     )
-    t.add("INBOX", make_email(ME, display="Jacob"))  # genuine copy: no verdict
     sync_account(conn, t, account_id=1)
-    dirs = sorted(
+    dirs = [
         r["direction"]
-        for r in conn.execute("SELECT direction FROM messages").fetchall()
-    )
-    assert dirs == ["in", "out"]
+        for r in conn.execute(
+            "SELECT direction FROM messages ORDER BY folder_id, uid"
+        ).fetchall()
+    ]
+    assert dirs == ["in", "in", "out", "out"]
+    scored = conn.execute(
+        "SELECT COUNT(*) FROM message_scores ms"
+        " JOIN messages m ON m.id = ms.message_id WHERE m.direction = 'in'"
+    ).fetchone()[0]
+    assert scored == 2
 
 
 def test_high_water_mark_stops_at_fetch_gap(conn):

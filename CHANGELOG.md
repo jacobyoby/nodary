@@ -23,9 +23,12 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   double-delivered copies and the same delivery reaching two synced accounts
   (forwarding), which previously inflated sender baselines and cluttered the
   dashboard.
-- **Security:** self-From alone no longer bypasses scoring. A spoofed message
-  using the user's own address that fails DMARC is classified incoming and
-  scored; genuine self-sent copies (no verdict, or pass) stay outgoing.
+- **Security:** self-From alone no longer bypasses scoring. A message using
+  the user's own address is classified incoming and scored unless it sits in
+  the Sent folder or a receiving server stamped Authentication-Results
+  without a DMARC failure (the shape of a genuine self-sent copy).
+  Previously only a DMARC failure flipped the classification, so a self-From
+  spoof relayed by a server that stamps no verdict was never scored.
 - The sync high-water mark no longer advances past messages the transport
   could not serve (e.g. an `.emlx` not yet downloaded by Mail); they are
   retried on the next sync instead of being skipped forever.

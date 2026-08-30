@@ -152,17 +152,17 @@ def sync_folder(
             ]
             link_text, fully = _gather_text(transport, uid, parts)
             _, from_addr = parseaddr(str(msg.get("From", "")))
-            # Self-From alone must not bypass scoring: a spoofed message
-            # arriving from outside is stamped Authentication-Results by the
-            # receiving server and fails DMARC, while genuinely self-sent
-            # copies either carry no verdict (own sent mail) or pass.
+            # Self-From alone must not bypass scoring. A genuine self-sent
+            # copy lives in the Sent folder or carries a receiving-server
+            # Authentication-Results stamp without a DMARC failure. A
+            # self-From message with no verdict at all is the spoofing blind
+            # spot — classify it incoming so it gets scored.
             auth = parse_auth_results(msg.get("Authentication-Results", "") or "")
             is_self = normalize_address(from_addr) in my_addrs
-            direction = (
-                "out"
-                if role == "sent" or (is_self and auth.get("dmarc") != "fail")
-                else "in"
-            )
+            if role == "sent" or (is_self and auth and auth.get("dmarc") != "fail"):
+                direction = "out"
+            else:
+                direction = "in"
             record = record_from_headers(
                 msg,
                 direction=direction,
