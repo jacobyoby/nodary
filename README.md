@@ -41,39 +41,39 @@ normal-looking signal cannot subtract points from another warning.
 
 Identity and spoofing features apply to all tiers:
 
-| Feature | Weight | Why it exists |
-|---|---:|---|
-| `lookalike_domain` | 25 | Detects registrable domains that resemble a trusted non-freemail domain through a Unicode confusable skeleton or small edit distance. This targets lookalike-domain phishing. |
-| `display_name_collision` | 25 | Detects a display name matching a Tier 3 contact when the address differs. This targets direct impersonation of trusted people. |
-| `auth_fail` | 15 | Uses receiving-server SPF, DKIM, and DMARC results as evidence that the sender identity may be forged. |
-| `reply_to_divergence` | 10 | Flags an established sender redirecting replies to an address in a different registrable domain that they have not used before. This catches account or identity abuse that moves the conversation elsewhere. |
-| `embedded_addr_mismatch` | 10 | Flags an email address written in the display name when its domain differs from the actual From domain. This catches attempts to present a trusted address while sending from another one. |
+| Feature | Why it exists |
+|---|---|
+| `lookalike_domain` | Detects registrable domains that resemble a trusted non-freemail domain through a Unicode confusable skeleton or small edit distance. This targets lookalike-domain phishing. |
+| `display_name_collision` | Detects a display name matching a Tier 3 contact when the address differs. This targets direct impersonation of trusted people. |
+| `auth_fail` | Uses receiving-server SPF, DKIM, and DMARC results as evidence that the sender identity may be forged. |
+| `reply_to_divergence` | Flags an established sender redirecting replies to an address in a different registrable domain that they have not used before. This catches account or identity abuse that moves the conversation elsewhere. |
+| `embedded_addr_mismatch` | Flags an email address written in the display name when its domain differs from the actual From domain. This catches attempts to present a trusted address while sending from another one. |
 
-Behavioral features apply only to Tier 2 and Tier 3 senders with at least eight
-prior messages. Novelty signals use the confidence factor `n / (n + 10)`, so a
-larger history provides stronger evidence.
+Behavioral features apply only to Tier 2 and Tier 3 senders with enough prior
+history to judge against. Novelty signals are confidence-weighted, so a larger
+history provides stronger evidence.
 
-| Feature | Weight | Why it exists |
-|---|---:|---|
-| `attachment_type_novelty` | 15 | Detects an extension/MIME pair never before seen from the sender. A new payload type is useful evidence of compromised-contact behavior shift. |
-| `first_attachment_ever` | 10 | Detects the first attachment from a sender whose history had none. This is a broader payload-shift signal; the engine avoids double-counting it with attachment-type novelty. |
-| `link_domain_novelty` | 10 | Measures the share of linked domains the sender has never used before. This targets compromised contacts introducing unfamiliar destinations. |
-| `send_hour_anomaly` | 8 | Detects mail sent at an unusual hour in the sender's own clock from the Date header. This can expose a change in the person or system controlling the account. |
-| `link_density_anomaly` | 5 | Detects substantially more links than the sender's baseline. This captures a shift toward link-heavy payload delivery. |
-| `size_anomaly` | 5 | Detects message size far outside the sender's log-size baseline. Large or small structural changes can accompany a new payload or changed sending process. |
-| `dormant_resurrection` | 5 | Adds context when a contact returns after at least 90 days and more than six times their typical gap, but only alongside another identity or behavioral flag. Dormant relationships are useful cover for compromised-contact attacks. |
+| Feature | Why it exists |
+|---|---|
+| `attachment_type_novelty` | Detects an extension/MIME pair never before seen from the sender. A new payload type is useful evidence of compromised-contact behavior shift. |
+| `first_attachment_ever` | Detects the first attachment from a sender whose history had none. This is a broader payload-shift signal; the engine avoids double-counting it with attachment-type novelty. |
+| `link_domain_novelty` | Measures the share of linked domains the sender has never used before. This targets compromised contacts introducing unfamiliar destinations. |
+| `send_hour_anomaly` | Detects mail sent at an unusual hour in the sender's own clock from the Date header. This can expose a change in the person or system controlling the account. |
+| `link_density_anomaly` | Detects substantially more links than the sender's baseline. This captures a shift toward link-heavy payload delivery. |
+| `size_anomaly` | Detects message size far outside the sender's log-size baseline. Large or small structural changes can accompany a new payload or changed sending process. |
+| `dormant_resurrection` | Adds context when a contact returns after an unusually long absence relative to their own history, but only alongside another identity or behavioral flag. Dormant relationships are useful cover for compromised-contact attacks. |
 
-Cold-contact features apply only to Tier 0 and Tier 1 senders with fewer than
-eight prior messages. They provide context for first or barely established
+Cold-contact features apply only to Tier 0 and Tier 1 senders with little prior
+history. They provide context for first or barely established
 contact; they do not by themselves assert malicious intent. A Tier 0/1 sender
-with eight or more messages receives identity features only (behavioral
+with a longer history receives identity features only (behavioral
 features require Tier 2+).
 
-| Feature | Weight | Why it exists |
-|---|---:|---|
-| `cold_attachment` | 12 | Highlights a payload from a never-seen sender, a common cold-outreach delivery pattern. |
-| `cold_links` | 6 | Highlights links from a never-seen sender, where no behavioral history exists to judge the destinations. |
-| `cold_replyto` | 8 | Highlights a never-seen sender redirecting replies away from the From identity, a useful sign of deceptive outreach. |
+| Feature | Why it exists |
+|---|---|
+| `cold_attachment` | Highlights a payload from a never-seen sender, a common cold-outreach delivery pattern. |
+| `cold_links` | Highlights links from a never-seen sender, where no behavioral history exists to judge the destinations. |
+| `cold_replyto` | Highlights a never-seen sender redirecting replies away from the From identity, a useful sign of deceptive outreach. |
 
 ## Trust tiers
 
@@ -83,7 +83,7 @@ the first match wins:
 | Tier | Rule |
 |---:|---|
 | 3 | At least one thread the user replied to, or at least one thread the user initiated: established correspondence. |
-| 2 | At least two messages spanning at least seven days, without a user reply: prior one-way contact. |
+| 2 | Prior one-way contact spread over time, without a user reply. |
 | 1 | The sender is new, but its registrable domain has at least one replied-to thread and is not a freemail domain: known organization. |
 | 0 | Everything else: never seen or insufficient history. |
 

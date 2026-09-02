@@ -140,7 +140,7 @@ Trust tiers are computed, not manually assigned. The first matching rule wins:
 | Tier | Rule | Label |
 |---:|---|---|
 | 3 | `n_replied_threads >= 1` or `n_user_initiated >= 1` | established |
-| 2 | At least 2 messages spanning at least 7 days, with no user reply/initiated thread | prior one-way contact |
+| 2 | Prior one-way contact spread over time, with no user reply/initiated thread | prior one-way contact |
 | 1 | New sender, same non-freemail registrable domain as a domain with at least one replied thread | sender new, organization known |
 | 0 | Everything else | never seen |
 
@@ -148,45 +148,14 @@ Freemail domains never propagate Tier 1 to unrelated senders.
 
 ## Scoring
 
-The scoring registry is `src/nodary/scoring/registry.py`.
-`ENGINE_VERSION = "1.0.0"` is stored on each score. Each feature returns a raw
-value in `[0, 1]`; contribution is `raw * weight`; total score is capped at
-100. Features are monotone, so normal-looking behavior never subtracts points
-from another warning.
+The scoring registry is `src/nodary/scoring/registry.py`. Each feature returns a
+raw value in `[0, 1]`, contributions are weighted and summed, and the total is
+capped at 100. Features are monotone, so normal-looking behavior never subtracts
+points from another warning. Features fall into three families — identity and
+spoofing (all tiers), behavioral novelty against the sender's own history
+(established senders only), and cold-contact context (new senders only).
 
-Identity/spoofing features apply at all tiers:
-
-| Feature | Weight | Current behavior |
-|---|---:|---|
-| `lookalike_domain` | 25 | Fires when an untrusted non-own sender domain skeleton-collides with, or is edit-distance 1/2 from, a trusted non-freemail Tier >= 2 domain. |
-| `display_name_collision` | 25 | Fires when a display-name skeleton matches a Tier 3 contact's name and the sender differs. |
-| `auth_fail` | 15 | DMARC fail = 1.0; DKIM fail plus SPF fail/softfail = 0.8; SPF softfail = 0.4. |
-| `reply_to_divergence` | 10 | For Tier >= 2 senders, fires when Reply-To uses a different registrable domain and the sender has not used that Reply-To before. |
-| `embedded_addr_mismatch` | 10 | Fires when the display name contains an email-like token whose domain differs from the sender domain. |
-
-Behavioral features apply only when `tier >= 2` and `baseline_n >= 8`.
-Novelty signals use `confidence(n) = n / (n + 10)`:
-
-| Feature | Weight | Current behavior |
-|---|---:|---|
-| `attachment_type_novelty` | 15 | Fires for extension/MIME pairs not seen from this sender. |
-| `first_attachment_ever` | 10 | Fires instead of attachment-type novelty when the sender previously had no attachments. |
-| `link_domain_novelty` | 10 | Fires on the fraction of message link domains not seen from this sender, only when link extraction completed. |
-| `send_hour_anomaly` | 8 | Uses Laplace-smoothed sender-local hour history and `max(0, 1 - p * 24)`. |
-| `link_density_anomaly` | 5 | One-sided z-score for unusually many links, clamped from z=2 to z=6. |
-| `size_anomaly` | 5 | Two-sided z-score on log message size, clamped from z=2.5 to z=6.5. |
-| `dormant_resurrection` | 5 | Fires only alongside another flag when the gap is at least 90 days and more than 6x the sender's median prior gap. The median is computed from facts on demand. |
-
-Cold-contact features apply only when `tier <= 1` and `baseline_n < 8`.
-They run at full strength for a first-ever sender and half strength for a
-barely known sender:
-
-| Feature | Weight | Current behavior |
-|---|---:|---|
-| `cold_attachment` | 12 | Attachment from a never-seen or barely known sender. |
-| `cold_links` | 6 | One or more links from a never-seen or barely known sender. |
-| `cold_replyto` | 8 | Divergent Reply-To from a never-seen or barely known sender. |
-
-The dashboard orders incoming messages by anomaly score descending, then
-`sent_at` descending. Tier filtering is available, but tier is not used as the
-primary sort key.
+The exact feature weights, history gates, confidence curve and anomaly
+thresholds are deliberately not documented here: published to the letter they
+read as a checklist for staying under each line. The registry is the source of
+truth and is versioned by `ENGINE_VERSION`.
