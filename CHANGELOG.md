@@ -47,6 +47,12 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 - Tier 3 is labeled "established" (it includes user-initiated threads that
   have no reply yet, so "two-way" overstated it); stale design-doc and
   docstring claims corrected; `__version__` synced to 0.3.0.
+- Messages with a missing or unparsable `Date` header no longer seed sender,
+  domain, and tier timelines with the 1970 epoch: `sent_at=0` is kept as the
+  unknown mark and excluded from first/last-seen, the Tier-2 span, median
+  gaps, and dormant-resurrection math. A `Date` without a UTC offset is read
+  as UTC instead of machine-local time, keeping `sent_at` and sender-local
+  hour baselines deterministic.
 
 ## [0.3.0] — 2026-07-23
 

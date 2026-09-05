@@ -55,23 +55,35 @@ class ProfileSnapshot:
 
 
 def upsert_sender(conn: sqlite3.Connection, email_norm: str, seen_at: int) -> int:
+    """seen_at <= 0 marks an unknown timestamp: identity is still recorded
+    but first/last-seen stay NULL rather than collapsing to the 1970 epoch."""
     row = conn.execute(
         "SELECT id, first_seen_at, last_seen_at FROM senders WHERE email_norm = ?",
         (email_norm,),
     ).fetchone()
     if row:
-        conn.execute(
-            "UPDATE senders SET first_seen_at = MIN(COALESCE(first_seen_at, ?), ?),"
-            " last_seen_at = MAX(COALESCE(last_seen_at, 0), ?) WHERE id = ?",
-            (seen_at, seen_at, seen_at, row["id"]),
-        )
+        if seen_at > 0:
+            conn.execute(
+                "UPDATE senders SET first_seen_at = MIN(COALESCE(first_seen_at, ?), ?),"
+                " last_seen_at = MAX(COALESCE(last_seen_at, 0), ?) WHERE id = ?",
+                (seen_at, seen_at, seen_at, row["id"]),
+            )
         return row["id"]
     domain = address_domain(email_norm)
     rd = reg_domain(domain)
+    known_at = seen_at if seen_at > 0 else None
     cur = conn.execute(
         "INSERT INTO senders (email_norm, domain, reg_domain, reg_domain_skeleton,"
         " is_freemail, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?)",
-        (email_norm, domain, rd, skeleton(rd), int(is_freemail(rd)), seen_at, seen_at),
+        (
+            email_norm,
+            domain,
+            rd,
+            skeleton(rd),
+            int(is_freemail(rd)),
+            known_at,
+            known_at,
+        ),
     )
     return cur.lastrowid
 
@@ -247,7 +259,11 @@ def update_profile_incoming(
         n_lnk = int(record.n_links > 0)
         n_rt = int(record.reply_to_email_norm is not None)
         n_threads = 1
-        first_at, last_at = record.sent_at, record.sent_at
+        # An undatable first message leaves the timeline empty, not 1970.
+        if record.sent_at > 0:
+            first_at, last_at = record.sent_at, record.sent_at
+        else:
+            first_at, last_at = None, None
         max_depth = thread_depth
     else:
         hour = unpack_hist(prof["hour_histogram"], HIST_HOURS)
@@ -266,8 +282,14 @@ def update_profile_incoming(
         n_lnk = prof["n_with_links"] + int(record.n_links > 0)
         n_rt = prof["n_replyto_divergent"] + int(record.reply_to_email_norm is not None)
         n_threads = prof["n_threads"] + int(thread_is_new)
-        first_at = min(prof["first_msg_at"] or record.sent_at, record.sent_at)
-        last_at = max(prof["last_msg_at"] or 0, record.sent_at)
+        # Undatable messages count toward the baseline but never move the
+        # timeline: folding in sent_at=0 would fake a 50-year span.
+        if record.sent_at > 0:
+            first_at = min(prof["first_msg_at"] or record.sent_at, record.sent_at)
+            last_at = max(prof["last_msg_at"] or 0, record.sent_at)
+        else:
+            first_at = prof["first_msg_at"]
+            last_at = prof["last_msg_at"]
         max_depth = max(prof["max_thread_depth"], thread_depth)
 
     if record.sent_hour_local is not None:
@@ -357,26 +379,38 @@ def update_profile_incoming(
 def update_domain_incoming(
     conn: sqlite3.Connection, rd: str, sent_at: int, new_sender: bool
 ) -> None:
+    if sent_at > 0:
+        conn.execute(
+            """INSERT INTO domain_profiles (reg_domain, n_senders, n_messages,
+                 n_replied_threads, is_freemail, first_seen_at, last_seen_at)
+               VALUES (?,?,1,0,?,?,?)
+               ON CONFLICT(reg_domain) DO UPDATE SET
+                 n_senders = n_senders + ?,
+                 n_messages = n_messages + 1,
+                 first_seen_at = MIN(COALESCE(first_seen_at, ?), ?),
+                 last_seen_at = MAX(COALESCE(last_seen_at, 0), ?)""",
+            (
+                rd,
+                int(new_sender),
+                int(is_freemail(rd)),
+                sent_at,
+                sent_at,
+                int(new_sender),
+                sent_at,
+                sent_at,
+                sent_at,
+            ),
+        )
+        return
+    # Unknown timestamp: counters still move, the timeline stays untouched.
     conn.execute(
         """INSERT INTO domain_profiles (reg_domain, n_senders, n_messages,
              n_replied_threads, is_freemail, first_seen_at, last_seen_at)
-           VALUES (?,?,1,0,?,?,?)
+           VALUES (?,?,1,0,?,NULL,NULL)
            ON CONFLICT(reg_domain) DO UPDATE SET
              n_senders = n_senders + ?,
-             n_messages = n_messages + 1,
-             first_seen_at = MIN(COALESCE(first_seen_at, ?), ?),
-             last_seen_at = MAX(COALESCE(last_seen_at, 0), ?)""",
-        (
-            rd,
-            int(new_sender),
-            int(is_freemail(rd)),
-            sent_at,
-            sent_at,
-            int(new_sender),
-            sent_at,
-            sent_at,
-            sent_at,
-        ),
+             n_messages = n_messages + 1""",
+        (rd, int(new_sender), int(is_freemail(rd)), int(new_sender)),
     )
 
 
@@ -429,7 +463,7 @@ def median_gap_seconds(
         r["sent_at"]
         for r in conn.execute(
             "SELECT sent_at FROM messages WHERE sender_id = ? AND direction='in'"
-            " AND sent_at < ? ORDER BY sent_at",
+            " AND sent_at > 0 AND sent_at < ? ORDER BY sent_at",
             (sender_id, before_ts),
         )
     ]

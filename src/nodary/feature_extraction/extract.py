@@ -12,6 +12,7 @@ Subjects and filenames are read only to derive counts/extensions.
 from __future__ import annotations
 
 import re
+from datetime import UTC
 from email.message import Message
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 
@@ -45,7 +46,11 @@ def parse_msgid_list(header_value: str | None) -> list[str]:
 
 def _sender_local_time(msg: Message) -> tuple[int | None, int | None, int | None]:
     """(utc_epoch, hour 0-23, dow 0-6) — hour/dow in the *sender's* UTC offset
-    as carried by the Date header, so baselines track the sender's clock."""
+    as carried by the Date header, so baselines track the sender's clock.
+    A Date header without an offset is read as UTC so results never depend
+    on the machine's local timezone; the wall-clock hour stays the sender's
+    own. Returns (None, None, None) when the header is missing or
+    unparsable — the record then carries sent_at=0 as the unknown mark."""
     raw = msg.get("Date")
     if not raw:
         return None, None, None
@@ -53,6 +58,8 @@ def _sender_local_time(msg: Message) -> tuple[int | None, int | None, int | None
         dt = parsedate_to_datetime(raw)
     except (ValueError, TypeError):
         return None, None, None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
     epoch = int(dt.timestamp())
     return epoch, dt.hour, dt.weekday()
 

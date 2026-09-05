@@ -276,8 +276,9 @@ def _behavioral_features(
             f"{_fmt_size(int(math.exp(snap.log_size_mean)))}",
         )
 
-    # dormant_resurrection — only alongside other flags
-    if out and snap.last_msg_at is not None:
+    # dormant_resurrection — only alongside other flags; unknown timestamps
+    # (sent_at=0 mark, legacy 1970 rows) never form a gap.
+    if out and (snap.last_msg_at or 0) > 0 and record.sent_at > 0:
         gap = record.sent_at - snap.last_msg_at
         if gap >= R.DORMANT_MIN_GAP_SECONDS:
             med = median_gap_seconds(conn, snap.sender_id, record.sent_at)

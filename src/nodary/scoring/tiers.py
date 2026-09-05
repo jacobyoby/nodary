@@ -20,11 +20,14 @@ _ONE_WAY_MIN_SPAN_SECONDS = 7 * 86400
 def compute_tier(conn: sqlite3.Connection, snap: ProfileSnapshot) -> int:
     if snap.n_replied_threads >= 1 or snap.n_user_initiated >= 1:
         return 3
+    # A 0 first/last-seen is the unknown-timestamp mark (or a legacy 1970
+    # row), never a real span endpoint.
+    first = snap.first_msg_at or 0
+    last = snap.last_msg_at or 0
     if (
         snap.n_messages >= _ONE_WAY_MIN_MESSAGES
-        and snap.first_msg_at is not None
-        and snap.last_msg_at is not None
-        and snap.last_msg_at - snap.first_msg_at >= _ONE_WAY_MIN_SPAN_SECONDS
+        and first > 0
+        and last - first >= _ONE_WAY_MIN_SPAN_SECONDS
     ):
         return 2
     if not snap.is_freemail:

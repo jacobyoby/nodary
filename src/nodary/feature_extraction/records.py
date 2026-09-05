@@ -20,7 +20,9 @@ class MessageRecord:
 
     direction: str  # 'in' | 'out'
     from_email_norm: str
-    sent_at: int  # UTC epoch seconds
+    # UTC epoch seconds; 0 marks an unknown timestamp (missing/unparsable
+    # Date). Time math over first/last-seen, spans, and gaps must exclude it.
+    sent_at: int
     size_bytes: int
     message_id: str | None = None
     from_display_name: str | None = None
