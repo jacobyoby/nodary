@@ -115,7 +115,7 @@ def test_sender_detail_baselines_and_recent_messages(client, mailbox):
     assert r.status_code == 200
     data = r.get_json()
     assert data["email_norm"] == peer
-    assert data["display_name"] == "sam okafor"
+    assert data["display_name"] == "Sam Okafor"
     assert data["trust_tier"] == 3
     assert data["tier_label"] == "established"
     assert "n_replied_threads" in data["tier_rule"]

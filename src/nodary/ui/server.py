@@ -87,10 +87,18 @@ def _sender_detail(conn: sqlite3.Connection, sender_id: int) -> dict | None:
         else None
     )
     display = conn.execute(
-        "SELECT name_norm FROM sender_display_names"
-        " WHERE sender_id = ? ORDER BY n DESC LIMIT 1",
+        "SELECT from_display_name FROM messages"
+        " WHERE sender_id = ? AND from_display_name IS NOT NULL"
+        " AND from_display_name != ''"
+        " ORDER BY sent_at DESC, id DESC LIMIT 1",
         (sender_id,),
     ).fetchone()
+    if display is None:
+        display = conn.execute(
+            "SELECT name_norm AS from_display_name FROM sender_display_names"
+            " WHERE sender_id = ? ORDER BY n DESC LIMIT 1",
+            (sender_id,),
+        ).fetchone()
     attachment_types = [
         {"extension": r["extension"], "mime_type": r["mime_type"], "n": r["n"]}
         for r in conn.execute(
@@ -128,7 +136,7 @@ def _sender_detail(conn: sqlite3.Connection, sender_id: int) -> dict | None:
     return {
         "id": row["id"],
         "email_norm": row["email_norm"],
-        "display_name": display["name_norm"] if display else None,
+        "display_name": display["from_display_name"] if display else None,
         "domain": row["domain"],
         "reg_domain": row["reg_domain"],
         "is_freemail": bool(row["is_freemail"]),
