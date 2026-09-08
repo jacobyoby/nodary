@@ -10,7 +10,7 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ### Added
 - README notes Jacobrakai Foundation 501(c)(3) status (EIN 33-3382083) and
-  links the IRS Letter 947 determination.
+  IRS Letter 947 dated September 3, 2026.
 - Privacy-invariant regression tests (`tests/test_privacy_invariants.py`) and
   a `SECURITY.md` threat-model stub. After a synthetic sync with rich
   headers, body, and attachments, CI asserts the database, `/api/messages`
