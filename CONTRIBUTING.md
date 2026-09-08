@@ -10,6 +10,8 @@
    URLs are never written to the database. If a feature needs new data,
    derive the minimal structural value (count, extension, registrable
    domain, histogram bucket) and document it in `docs/DESIGN.md`.
+   `tests/test_privacy_invariants.py` fails CI if a new column or extract
+   path starts keeping that content; see `SECURITY.md`.
 3. **Scoring stays deterministic and explainable.** Every feature returns a
    normalized [0,1] raw value, a registry weight, and a rendered explanation
    string. No opaque models, no randomness, no wall-clock dependence in
