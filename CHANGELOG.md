@@ -20,6 +20,11 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   last sync time, engine version, and database encryption state.
 
 ### Fixed
+- Mail-store sync no longer stalls a folder behind a corrupt or unparseable
+  `.emlx`: permanent parse failures are recorded in `skipped_messages` and the
+  high-water mark advances past them, while absent files and failed
+  `.partial.emlx` downloads still stop at the gap and retry. `nodary sync`
+  reports the two skip counts separately.
 - A base64 text part with invalid padding is recorded as
   `links_extracted=0` instead of an empty, fully scanned body. The previous
   catch-all returned empty bytes and let scoring treat the message as

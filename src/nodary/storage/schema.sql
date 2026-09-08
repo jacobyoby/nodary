@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS folders (
   UNIQUE (account_id, name)
 );
 
+-- Permanent mail-store fetch failures (corrupt / unparseable .emlx).
+-- Transient gaps are not stored: those retry from last_seen_uid.
+-- path/reason only — no message content.
+CREATE TABLE IF NOT EXISTS skipped_messages (
+  id         INTEGER PRIMARY KEY,
+  folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+  uid        INTEGER NOT NULL,
+  path       TEXT,
+  reason     TEXT NOT NULL,
+  skipped_at INTEGER NOT NULL,
+  UNIQUE (folder_id, uid)
+);
+
 CREATE TABLE IF NOT EXISTS senders (
   id                  INTEGER PRIMARY KEY,
   email_norm          TEXT NOT NULL UNIQUE,

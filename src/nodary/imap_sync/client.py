@@ -8,14 +8,41 @@ can substitute a fake without touching sync logic.
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 from typing import Any, Protocol
+
+
+@dataclass(frozen=True)
+class FetchFailure:
+    """A UID the transport will never be able to serve.
+
+    Transient gaps (not-yet-downloaded files) are omitted from FetchMeta
+    entirely so sync can stop the high-water mark. Permanent failures are
+    listed here so sync can record them and advance past.
+    """
+
+    uid: int
+    path: str | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class FetchMeta:
+    """Result of fetch_meta: successful messages plus permanent failures.
+
+    UIDs present in neither `messages` nor `permanent_failures` are
+    transient gaps and must be retried.
+    """
+
+    messages: dict[int, dict[str, Any]]
+    permanent_failures: tuple[FetchFailure, ...] = ()
 
 
 class Transport(Protocol):
     def list_sync_folders(self) -> list[tuple[str, str]]: ...
     def select_readonly(self, name: str) -> dict[str, int]: ...
     def new_uids(self, after_uid: int) -> list[int]: ...
-    def fetch_meta(self, uids: list[int]) -> dict[int, dict[str, Any]]: ...
+    def fetch_meta(self, uids: list[int]) -> FetchMeta: ...
     def fetch_part(self, uid: int, section: str) -> bytes: ...
 
 
@@ -52,7 +79,7 @@ class ImapTransport:
         # RFC quirk: 'N:*' matches the last message even when N > max UID.
         return sorted(u for u in uids if u > after_uid)
 
-    def fetch_meta(self, uids: list[int]) -> dict[int, dict[str, Any]]:
+    def fetch_meta(self, uids: list[int]) -> FetchMeta:
         resp = self.client.fetch(
             uids, [b"BODY.PEEK[HEADER]", b"RFC822.SIZE", b"BODYSTRUCTURE"]
         )
@@ -64,7 +91,7 @@ class ImapTransport:
                 "size": int(data.get(b"RFC822.SIZE", len(header))),
                 "bodystructure": data.get(b"BODYSTRUCTURE"),
             }
-        return out
+        return FetchMeta(messages=out)
 
     def fetch_part(self, uid: int, section: str) -> bytes:
         key = f"BODY[{section}]".encode()

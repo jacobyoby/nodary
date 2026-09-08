@@ -103,10 +103,17 @@ def cmd_sync(args) -> int:
             claimed_uuids.add(uuid)
             transport = MailStoreTransport(mail_store, uuid)
             stats = sync_account(conn, transport, acct["id"])
-            if transport.skipped:
+            if transport.skipped_transient:
                 print(
-                    f"  warning: {transport.skipped} indexed message(s) had no "
-                    "readable .emlx and were skipped",
+                    f"  warning: {transport.skipped_transient} indexed "
+                    "message(s) are not yet on disk and will be retried",
+                    file=sys.stderr,
+                )
+            if transport.skipped_permanent:
+                print(
+                    f"  warning: {transport.skipped_permanent} indexed "
+                    "message(s) had a corrupt or unparseable .emlx and were "
+                    "skipped",
                     file=sys.stderr,
                 )
         else:
@@ -156,6 +163,11 @@ def cmd_set_source(args) -> int:
     # facts would double-count history under new folder ids
     conn.execute(
         "DELETE FROM messages WHERE folder_id IN"
+        " (SELECT id FROM folders WHERE account_id = ?)",
+        (args.account_id,),
+    )
+    conn.execute(
+        "DELETE FROM skipped_messages WHERE folder_id IN"
         " (SELECT id FROM folders WHERE account_id = ?)",
         (args.account_id,),
     )

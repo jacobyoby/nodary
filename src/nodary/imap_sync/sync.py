@@ -27,7 +27,7 @@ from ..feature_extraction.normalize import normalize_address
 from ..feature_extraction.records import AttachmentInfo
 from ..pipeline import ingest_message
 from .bodystructure import PartInfo, walk
-from .client import Transport
+from .client import FetchFailure, Transport
 
 BATCH_SIZE = 200
 _parser = BytesParser(policy=policy.default)
@@ -104,9 +104,20 @@ def _folder_id(conn: sqlite3.Connection, account_id: int, name: str, role: str) 
 
 def _invalidate_folder(conn: sqlite3.Connection, folder_id: int) -> None:
     conn.execute("DELETE FROM messages WHERE folder_id = ?", (folder_id,))
+    conn.execute("DELETE FROM skipped_messages WHERE folder_id = ?", (folder_id,))
     conn.execute(
         "UPDATE folders SET last_seen_uid = 0, uidvalidity = NULL WHERE id = ?",
         (folder_id,),
+    )
+
+
+def _record_permanent_skip(
+    conn: sqlite3.Connection, folder_id: int, failure: FetchFailure
+) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO skipped_messages"
+        " (folder_id, uid, path, reason, skipped_at) VALUES (?,?,?,?,?)",
+        (folder_id, failure.uid, failure.path, failure.reason, int(time.time())),
     )
 
 
@@ -139,14 +150,19 @@ def sync_folder(
         stats.initial_backfill = True
     for start in range(0, len(uids), BATCH_SIZE):
         batch = uids[start : start + BATCH_SIZE]
-        meta = transport.fetch_meta(batch)
-        # Never advance the high-water mark past a UID we could not fetch —
-        # the mail store indexes messages before their .emlx lands on disk,
-        # and advancing would orphan them forever. Stop at the first gap and
-        # retry from there next sync.
-        missing = [u for u in batch if u not in meta]
+        fetched = transport.fetch_meta(batch)
+        meta = fetched.messages
+        permanent = {f.uid: f for f in fetched.permanent_failures}
+        # Transient gaps (absent / still-downloading files) stay out of both
+        # maps. Permanent corruptions are listed so we can record them and
+        # advance the high-water mark instead of stalling the folder.
+        missing = [u for u in batch if u not in meta and u not in permanent]
         if missing:
-            batch = [u for u in batch if u < min(missing)]
+            gap = min(missing)
+            batch = [u for u in batch if u < gap]
+            permanent = {uid: f for uid, f in permanent.items() if uid < gap}
+        for failure in permanent.values():
+            _record_permanent_skip(conn, folder_id, failure)
         for uid in batch:
             m = meta.get(uid)
             if m is None:

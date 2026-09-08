@@ -18,8 +18,10 @@ from __future__ import annotations
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
+from pathlib import Path
 
 from ..feature_extraction.extract import MAX_TEXT_SCAN_BYTES
+from ..imap_sync.client import FetchFailure, FetchMeta
 from .emlx import EmlxError, read_emlx
 from .store import MailStore
 
@@ -81,11 +83,24 @@ def _build(part: Message, section: str, parts_out: dict[str, bytes]) -> tuple:
     return _leaf_tuple(part, size)
 
 
+def _is_partial_emlx(path: Path) -> bool:
+    return path.name.endswith(".partial.emlx")
+
+
+def _failure_reason(exc: BaseException) -> str:
+    # EmlxError mentions only the filename and framing problem; other
+    # parser exceptions may embed payload bytes, so keep just the type.
+    if isinstance(exc, EmlxError):
+        return str(exc)
+    return type(exc).__name__
+
+
 class MailStoreTransport:
     def __init__(self, store: MailStore, account_uuid: str):
         self.store = store
         self.account_uuid = account_uuid
-        self.skipped = 0  # indexed messages whose .emlx was missing/unreadable
+        self.skipped_transient = 0  # absent or in-progress .partial.emlx
+        self.skipped_permanent = 0  # present .emlx that will never parse
         self._folder: str | None = None
         self._mailbox_rowid: int | None = None
         self._parts: dict[int, dict[str, bytes]] = {}
@@ -112,27 +127,35 @@ class MailStoreTransport:
         assert self._mailbox_rowid is not None, "call select_readonly first"
         return self.store.new_rowids(self._mailbox_rowid, after_uid)
 
-    def fetch_meta(self, uids: list[int]) -> dict[int, dict]:
+    def fetch_meta(self, uids: list[int]) -> FetchMeta:
         assert self._folder is not None, "call select_readonly first"
         self._parts.clear()
         out: dict[int, dict] = {}
+        permanent: list[FetchFailure] = []
         for uid in uids:
             path = self.store.message_path(self.account_uuid, self._folder, uid)
             if path is None:
-                self.skipped += 1
+                self.skipped_transient += 1
                 continue
             try:
                 raw = read_emlx(path).rfc822
                 msg = _parser.parsebytes(raw)
                 parts: dict[str, bytes] = {}
                 bodystructure = _build(msg, "", parts)
-            except (EmlxError, OSError):
-                self.skipped += 1
+            except OSError:
+                # I/O race while Mail is still writing the file
+                self.skipped_transient += 1
                 continue
-            except Exception:
-                # a single malformed message must never abort the sync;
-                # skip it and let the high-water mark move past
-                self.skipped += 1
+            except Exception as exc:
+                # a single malformed message must never abort the sync
+                if _is_partial_emlx(path):
+                    # .partial.emlx is an in-progress download; retry later
+                    self.skipped_transient += 1
+                    continue
+                self.skipped_permanent += 1
+                permanent.append(
+                    FetchFailure(uid=uid, path=str(path), reason=_failure_reason(exc))
+                )
                 continue
             self._parts[uid] = parts
             out[uid] = {
@@ -140,7 +163,7 @@ class MailStoreTransport:
                 "size": len(raw),
                 "bodystructure": bodystructure,
             }
-        return out
+        return FetchMeta(messages=out, permanent_failures=tuple(permanent))
 
     def fetch_part(self, uid: int, section: str) -> bytes:
         return self._parts.get(uid, {}).get(section, b"")

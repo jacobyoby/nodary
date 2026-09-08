@@ -4,6 +4,7 @@ import sqlite3
 import pytest
 
 from nodary.imap_sync.bodystructure import walk
+from nodary.imap_sync.sync import sync_account
 from nodary.mail_store import MailStore, MailStoreTransport
 
 UUID = "AAAA1111-2222-3333-4444-555566667777"
@@ -37,7 +38,7 @@ SENT = (
 )
 
 
-def write_emlx(root, folder_path, rowid, message, partial=False):
+def emlx_dir(root, folder_path, rowid):
     mbox = root / UUID
     for comp in folder_path.split("/"):
         mbox = mbox / f"{comp}.mbox"
@@ -48,11 +49,31 @@ def write_emlx(root, folder_path, rowid, message, partial=False):
             sub = sub / d
     sub = sub / "Messages"
     sub.mkdir(parents=True, exist_ok=True)
+    return sub
+
+
+def write_emlx(root, folder_path, rowid, message, partial=False):
     suffix = ".partial.emlx" if partial else ".emlx"
     payload = plistlib.dumps({"flags": 0})
-    (sub / f"{rowid}{suffix}").write_bytes(
+    (emlx_dir(root, folder_path, rowid) / f"{rowid}{suffix}").write_bytes(
         str(len(message)).encode() + b"\n" + message + payload
     )
+
+
+def write_corrupt_emlx(root, folder_path, rowid, partial=False):
+    suffix = ".partial.emlx" if partial else ".emlx"
+    (emlx_dir(root, folder_path, rowid) / f"{rowid}{suffix}").write_bytes(
+        b"this is not a valid emlx\n"
+    )
+
+
+def index_message(root, mailbox_rowid, rowid, sender=1):
+    conn = sqlite3.connect(root / "MailData" / "Envelope Index")
+    conn.execute(
+        "INSERT INTO messages VALUES (?, ?, ?, 0)", (rowid, mailbox_rowid, sender)
+    )
+    conn.commit()
+    conn.close()
 
 
 @pytest.fixture
@@ -105,9 +126,10 @@ def test_fetch_meta_and_parts(store):
     t = MailStoreTransport(store, UUID)
     info = t.select_readonly("INBOX")
     assert info["uidnext"] == 1204
-    meta = t.fetch_meta([1201, 9999])  # 9999: indexed nowhere, no file
-    assert set(meta) == {1201}
-    m = meta[1201]
+    fetched = t.fetch_meta([1201, 9999])  # 9999: indexed nowhere, no file
+    assert set(fetched.messages) == {1201}
+    assert fetched.permanent_failures == ()
+    m = fetched.messages[1201]
     assert b"Subject: report" in m["header"]
     parts = walk(m["bodystructure"])
     assert [p.mime_type for p in parts] == ["text/plain", "application/pdf"]
@@ -120,8 +142,8 @@ def test_fetch_meta_and_parts(store):
 def test_partial_emlx_headers_still_parse(store):
     t = MailStoreTransport(store, UUID)
     t.select_readonly("Sent Messages")
-    meta = t.fetch_meta([1202])
-    assert b"Subject: re: report" in meta[1202]["header"]
+    fetched = t.fetch_meta([1202])
+    assert b"Subject: re: report" in fetched.messages[1202]["header"]
 
 
 def test_uidvalidity_tracks_mailbox_identity(store):
@@ -133,10 +155,113 @@ def test_uidvalidity_tracks_mailbox_identity(store):
     assert inbox["uidvalidity"] != sent["uidvalidity"]
 
 
-def test_missing_emlx_counted_as_skipped(store):
+def test_missing_emlx_counted_as_transient(store):
     t = MailStoreTransport(store, UUID)
     t.select_readonly("INBOX")
     # 1203 is indexed but deleted=1 and has no file on disk
-    meta = t.fetch_meta([1201, 1203])
-    assert set(meta) == {1201}
-    assert t.skipped == 1
+    fetched = t.fetch_meta([1201, 1203])
+    assert set(fetched.messages) == {1201}
+    assert fetched.permanent_failures == ()
+    assert t.skipped_transient == 1
+    assert t.skipped_permanent == 0
+
+
+def test_fetch_meta_distinguishes_transient_and_permanent(store):
+    index_message(store.root, mailbox_rowid=1, rowid=1204)
+    index_message(store.root, mailbox_rowid=1, rowid=1205)
+    write_corrupt_emlx(store.root, "INBOX", 1204)
+    t = MailStoreTransport(store, UUID)
+    t.select_readonly("INBOX")
+    # 1203: absent file (transient); 1204: present but unparseable (permanent)
+    fetched = t.fetch_meta([1201, 1203, 1204, 1205])
+    assert set(fetched.messages) == {1201}
+    assert [f.uid for f in fetched.permanent_failures] == [1204]
+    assert fetched.permanent_failures[0].path is not None
+    assert fetched.permanent_failures[0].path.endswith("1204.emlx")
+    assert t.skipped_transient == 2  # 1203 absent, 1205 absent
+    assert t.skipped_permanent == 1
+
+
+def test_corrupt_emlx_does_not_block_later_messages(store, conn):
+    """A permanently unparseable .emlx must not stall the high-water mark:
+    the valid message after it is ingested on the first sync."""
+    index_message(store.root, mailbox_rowid=1, rowid=1204)
+    index_message(store.root, mailbox_rowid=1, rowid=1205)
+    write_corrupt_emlx(store.root, "INBOX", 1204)
+    write_emlx(store.root, "INBOX", 1205, MULTIPART)
+    t = MailStoreTransport(store, UUID)
+    stats = sync_account(conn, t, account_id=1)
+    inbox_uids = [
+        r["uid"]
+        for r in conn.execute(
+            "SELECT uid FROM messages m JOIN folders f ON f.id = m.folder_id"
+            " WHERE f.name = 'INBOX' ORDER BY uid"
+        )
+    ]
+    assert 1201 in inbox_uids
+    assert 1204 not in inbox_uids
+    assert 1205 in inbox_uids
+    assert stats.new_messages == 3  # 1202 sent + 1201 + 1205
+    last = conn.execute(
+        "SELECT last_seen_uid FROM folders WHERE name = 'INBOX'"
+    ).fetchone()["last_seen_uid"]
+    assert last == 1205
+    skipped = conn.execute(
+        "SELECT uid, path, reason FROM skipped_messages ORDER BY uid"
+    ).fetchall()
+    assert [r["uid"] for r in skipped] == [1204]
+    assert skipped[0]["path"].endswith("1204.emlx")
+    assert skipped[0]["reason"]
+    assert t.skipped_permanent == 1
+    assert t.skipped_transient == 0
+
+
+def test_missing_emlx_still_stops_high_water_mark(store, conn):
+    """An indexed row with no file on disk is transient: stop and retry."""
+    index_message(store.root, mailbox_rowid=1, rowid=1204)
+    index_message(store.root, mailbox_rowid=1, rowid=1205)
+    write_emlx(store.root, "INBOX", 1205, MULTIPART)
+    t = MailStoreTransport(store, UUID)
+    stats = sync_account(conn, t, account_id=1)
+    inbox_uids = [
+        r["uid"]
+        for r in conn.execute(
+            "SELECT uid FROM messages m JOIN folders f ON f.id = m.folder_id"
+            " WHERE f.name = 'INBOX' ORDER BY uid"
+        )
+    ]
+    assert inbox_uids == [1201]
+    assert stats.new_messages == 2  # 1202 sent + 1201; 1205 blocked by gap
+    last = conn.execute(
+        "SELECT last_seen_uid FROM folders WHERE name = 'INBOX'"
+    ).fetchone()["last_seen_uid"]
+    assert last == 1201
+    write_emlx(store.root, "INBOX", 1204, MULTIPART)
+    t2 = MailStoreTransport(store, UUID)
+    stats2 = sync_account(conn, t2, account_id=1)
+    inbox_uids = [
+        r["uid"]
+        for r in conn.execute(
+            "SELECT uid FROM messages m JOIN folders f ON f.id = m.folder_id"
+            " WHERE f.name = 'INBOX' ORDER BY uid"
+        )
+    ]
+    assert inbox_uids == [1201, 1204, 1205]
+    assert stats2.new_messages == 2
+
+
+def test_corrupt_partial_emlx_is_transient(store, conn):
+    """A .partial.emlx that fails to parse is still an in-progress download."""
+    index_message(store.root, mailbox_rowid=1, rowid=1204)
+    index_message(store.root, mailbox_rowid=1, rowid=1205)
+    write_corrupt_emlx(store.root, "INBOX", 1204, partial=True)
+    write_emlx(store.root, "INBOX", 1205, MULTIPART)
+    t = MailStoreTransport(store, UUID)
+    sync_account(conn, t, account_id=1)
+    last = conn.execute(
+        "SELECT last_seen_uid FROM folders WHERE name = 'INBOX'"
+    ).fetchone()["last_seen_uid"]
+    assert last == 1201
+    assert t.skipped_transient == 1
+    assert t.skipped_permanent == 0
+    assert conn.execute("SELECT COUNT(*) FROM skipped_messages").fetchone()[0] == 0
