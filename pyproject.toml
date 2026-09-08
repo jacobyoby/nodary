@@ -34,6 +34,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+extend-exclude = ["src/nodary/feature_extraction/_confusables_data.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]

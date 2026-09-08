@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-ENGINE_VERSION = "1.0.0"
+# 1.1.0: lookalike_domain and display_name_collision now skeleton through the
+# generated UTS #39 17.0.0 confusables map (plus the historical ASCII/digit
+# overlays). Mixed-script homoglyphs the curated subset missed — e.g.
+# Armenian օ — fire at raw=1.0. Stored scores from 1.0.0 are stale until
+# rebuild; NORMALIZE_VERSION is 2 for the same reason.
+ENGINE_VERSION = "1.1.0"
 
 # Behavioral features need a baseline to betray.
 MIN_BASELINE_N = 8
@@ -49,8 +54,8 @@ FEATURES: dict[str, FeatureDef] = {
             "lookalike_domain",
             25,
             "identity",
-            "Sender domain resembles a trusted domain (homoglyph "
-            "skeleton collision or edit distance ≤ 2).",
+            "Sender domain resembles a trusted domain (UTS #39 "
+            "homoglyph skeleton collision or edit distance ≤ 2).",
         ),
         FeatureDef(
             "display_name_collision",

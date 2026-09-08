@@ -64,7 +64,7 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 
 - [ ] Handle IMAP CONDSTORE/QRESYNC where available. Why: change-aware sync is
       cheaper than UID range scans for large mailboxes.
-- [ ] Confusables table generation from vendored Unicode UTS #39 skeleton data.
+- [x] Confusables table generation from vendored Unicode UTS #39 skeleton data.
       Why: the current curated subset is auditable but incomplete.
 - [ ] Dashboard sender drill-down page with baseline histograms and feature
       history. Why: a high score is easier to trust when the underlying sender

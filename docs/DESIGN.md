@@ -33,8 +33,10 @@ cloud scoring APIs, or emit telemetry.
 - With the `sqlcipher` extra installed, storage uses SQLCipher; otherwise it
   falls back to plain SQLite and records `schema_meta.encryption = none`.
 - Public Suffix List lookup uses `tldextract`'s bundled snapshot with runtime
-  fetching disabled. The freemail list and confusables subset are vendored in
-  `feature_extraction.normalize`.
+  fetching disabled. The freemail list is vendored in
+  `feature_extraction.normalize`. The confusables/skeleton map is a generated
+  snapshot of pinned Unicode UTS #39 data under `third_party/unicode/uts39/`;
+  sync and UI never download Unicode data.
 
 ## Main Components
 
@@ -109,8 +111,23 @@ tiers, and scores are regenerated deterministically.
   dots are removed.
 - Registrable domains come from the bundled `tldextract` Public Suffix List
   snapshot.
-- Display names and registrable domains are casefolded through a small
-  vendored UTS #39-style confusables table, plus common digit substitutions.
+- Display names and registrable domains are casefolded through a generated
+  UTS #39 confusables/skeleton map (Unicode Security Mechanisms 17.0.0), plus
+  historical ASCII/digit overlays (`0→o`, `1→l`, `3→e`, `5→s`, and the
+  pre-generation mixed-script ASCII folds). `NORMALIZE_VERSION` is 2.
+- To regenerate the runtime snapshot after updating the pinned drop:
+  1. Replace `third_party/unicode/uts39/<version>/confusables.txt` with a
+     versioned file from `https://www.unicode.org/Public/<version>/security/`
+     (never `latest/`).
+  2. Update `<version>/SHA256SUMS`, `PINNED_VERSION`, and `PINNED_SHA256` in
+     `scripts/generate_confusables.py`.
+  3. Run `uv run python scripts/generate_confusables.py` (stdlib only; no
+     network). That overwrites
+     `src/nodary/feature_extraction/_confusables_data.py`.
+  4. Run `uv run python scripts/generate_confusables.py --check` and
+     `uv run pytest tests/test_confusables_generate.py tests/test_normalize.py tests/test_scoring_lookalike.py`.
+  5. Bump `NORMALIZE_VERSION` and `ENGINE_VERSION` if skeletons change, and
+     note the drop version in `CHANGELOG.md`.
 - Sender-local hour/day come from the UTC offset carried in the `Date` header,
   so behavioral baselines follow the sender's clock rather than the user's.
 - Authentication verdicts are parsed from the receiving server's

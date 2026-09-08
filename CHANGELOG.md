@@ -8,6 +8,16 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Changed
+- Lookalike and display-name skeletons are generated from a pinned, vendored
+  Unicode UTS #39 17.0.0 `confusables.txt` drop (SHA-256 in
+  `third_party/unicode/uts39/17.0.0/SHA256SUMS`). Coverage expands to
+  mixed-script homoglyphs the curated subset missed (e.g. Armenian `օ→o`);
+  historical ASCII/digit overlays are preserved. Official UTS `m→rn` is
+  applied, so stored skeletons that contain `m` change shape on rebuild.
+  Runtime still reads only the generated snapshot — no Unicode download at
+  sync or UI time. `ENGINE_VERSION` 1.1.0; `NORMALIZE_VERSION` 2.
+
 ## [0.3.1] — 2026-09-08
 
 ### Added

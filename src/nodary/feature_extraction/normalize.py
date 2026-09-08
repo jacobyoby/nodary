@@ -2,7 +2,8 @@
 
 All rules are versioned constants — changing any of them bumps
 NORMALIZE_VERSION, which invalidates derived profiles (rebuild required).
-No network access: the Public Suffix List is tldextract's bundled snapshot.
+No network access: the Public Suffix List is tldextract's bundled snapshot,
+and the confusables map is a generated snapshot of pinned UTS #39 data.
 """
 
 from __future__ import annotations
@@ -11,7 +12,9 @@ import re
 import unicodedata
 from functools import lru_cache
 
-NORMALIZE_VERSION = 1
+from ._confusables_data import CONFUSABLES as _CONFUSABLES
+
+NORMALIZE_VERSION = 2
 
 # Domains whose reputation must never propagate to unrelated senders
 # (anyone can register a mailbox there). Vendored, versioned list.
@@ -96,60 +99,10 @@ FREEMAIL_DOMAINS = frozenset(
 # Providers where dots in the local part are insignificant.
 _DOT_INSENSITIVE = frozenset({"gmail.com", "googlemail.com"})
 
-# Homoglyph folding table (subset of Unicode UTS #39 confusables, plus the
-# digit substitutions actually seen in lookalike domains). Applied after NFKD
-# decomposition strips diacritics. Deliberately small and auditable.
-_CONFUSABLES = {
-    # Cyrillic -> Latin
-    "а": "a",
-    "е": "e",
-    "о": "o",
-    "р": "p",
-    "с": "c",
-    "х": "x",
-    "у": "y",
-    "і": "i",
-    "ѕ": "s",
-    "ј": "j",
-    "ԁ": "d",
-    "ɡ": "g",
-    "һ": "h",
-    "к": "k",
-    "м": "m",
-    "т": "t",
-    "в": "b",
-    "н": "h",
-    "ѡ": "w",
-    "ѵ": "v",
-    "ꞅ": "s",
-    # Greek -> Latin
-    "α": "a",
-    "β": "b",
-    "ε": "e",
-    "η": "n",
-    "ι": "i",
-    "κ": "k",
-    "ν": "v",
-    "ο": "o",
-    "ρ": "p",
-    "τ": "t",
-    "υ": "u",
-    "ω": "w",
-    # Digits / symbols commonly used as letters
-    "0": "o",
-    "1": "l",
-    "3": "e",
-    "5": "s",
-    "ø": "o",
-    "ł": "l",
-    "đ": "d",
-    # Latin lookalikes
-    "ı": "i",
-    "ǀ": "l",
-    "ⅼ": "l",
-    "ⅰ": "i",
-    "ⅴ": "v",
-}
+# Homoglyph folding table: generated from vendored UTS #39 confusables.txt
+# plus the historical ASCII overlays in scripts/generate_confusables.py.
+# Applied after NFKD decomposition strips diacritics. Do not edit the
+# snapshot by hand — see docs/DESIGN.md (Normalization).
 
 _WS_RE = re.compile(r"\s+")
 _URL_HOST_RE = re.compile(
@@ -180,7 +133,10 @@ def reg_domain(host: str) -> str:
 
 
 def skeleton(text: str) -> str:
-    """Homoglyph-folded form. Two strings that render alike collide here."""
+    """Homoglyph-folded form. Two strings that render alike collide here.
+
+    Uses only the vendored UTS #39 snapshot; never downloads Unicode data.
+    """
     out = []
     for ch in unicodedata.normalize("NFKD", text.lower()):
         if unicodedata.combining(ch):
