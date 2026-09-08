@@ -56,7 +56,7 @@ cloud scoring APIs, or emit telemetry.
 - `scoring.registry`, `scoring.engine`, and `scoring.tiers` define feature
   weights, scoring behavior, and trust tiers.
 - `ui.server` exposes local JSON endpoints and renders the self-contained
-  dashboard page.
+  dashboard page, including a sender-baseline drill-down.
 
 ## Sync Data Flow
 
@@ -167,3 +167,24 @@ The exact feature weights, history gates, confidence curve and anomaly
 thresholds are deliberately not documented here: published to the letter they
 read as a checklist for staying under each line. The registry is the source of
 truth and is versioned by `ENGINE_VERSION`.
+
+## Dashboard
+
+The dashboard is one self-contained HTML document on `127.0.0.1` (TLS via local
+mkcert when available). It makes no outbound requests and ships no external
+assets.
+
+The scored-message list still expands in place for per-feature contribution
+bars. From a message row — the sender name, or **sender baseline** in the
+expanded flags — the same page swaps to a local-only sender detail view
+(`#sender/<id>`). That view is the explainability surface for behavioral
+features: it shows the current trust tier and the rule that matched, message
+counts and dated span, the sender-local send-hour histogram, typical size and
+link-density from the Welford running stats, known attachment types
+(extension + MIME only), known link domains, the known Reply-To set, and
+recent scored messages with feature chips.
+
+`GET /api/senders/<id>` and `GET /api/messages` read existing profile and
+score tables only. Payloads omit subjects, filenames, full URLs, and body
+text. No new message content is persisted. Multi-account filtering and
+per-sender list collapse are separate concerns.

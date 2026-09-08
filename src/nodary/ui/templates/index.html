@@ -105,6 +105,51 @@
   .openmail:hover { border-color: var(--t3); }
   .empty { color: var(--dim); padding: 48px 0; text-align: center; }
   .empty code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+
+  a.who { color: inherit; text-decoration: none; }
+  a.who:hover .name { text-decoration: underline; }
+  .sender-open { display: inline-block; margin-top: 10px; margin-right: 8px;
+                 font-size: 13px; color: var(--t3); text-decoration: none;
+                 border: 1px solid var(--line); border-radius: 6px;
+                 padding: 3px 10px; }
+  .sender-open:hover { border-color: var(--t3); }
+
+  #sender-view[hidden], #list[hidden], .filters[hidden] { display: none; }
+  #sender-back { background: none; border: 0; color: var(--t3); font: inherit;
+                 font-size: 13px; padding: 0; cursor: pointer; margin-bottom: 12px; }
+  #sender-back:hover { text-decoration: underline; }
+  .sender-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+                 margin-bottom: 6px; }
+  .sender-head h2 { font-size: 18px; font-weight: 650; margin: 0; }
+  .sender-rule { color: var(--dim); font-size: 13px; margin: 0 0 18px; }
+  .sender-counts { color: var(--dim); font-size: 13px; margin: 0 0 18px; }
+  .sender-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+                 margin-bottom: 22px; }
+  @media (max-width: 720px) { .sender-grid { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+          background: var(--panel); box-shadow: var(--shadow); }
+  .card h3 { font-size: 13px; font-weight: 650; margin: 0 0 10px;
+             color: var(--dim); letter-spacing: .02em; text-transform: uppercase; }
+  .hour-hist { display: flex; align-items: flex-end; gap: 2px; height: 72px; }
+  .hbar { flex: 1; background: var(--t3-bg); border-radius: 2px 2px 0 0;
+          min-height: 2px; position: relative; }
+  .hbar.on { background: var(--t3); }
+  .hour-axis { display: flex; justify-content: space-between; color: var(--faint);
+               font-size: 11px; margin-top: 4px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; margin: 6px 0;
+        font-size: 14px; }
+  .kv .k { color: var(--dim); }
+  .chips, .known { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0;
+                   list-style: none; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 999px;
+          background: var(--t0-bg); color: var(--text); border: 1px solid var(--line); }
+  .chip.ok { background: var(--t3-bg); }
+  .recent { display: flex; flex-direction: column; gap: 8px; }
+  .recent .item { border: 1px solid var(--line); border-radius: 8px;
+                  padding: 10px 12px; background: var(--panel); }
+  .recent .top { display: flex; gap: 10px; align-items: baseline; }
+  .recent .score { font-weight: 700; }
+  .muted { color: var(--faint); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -122,6 +167,42 @@
   <button data-tier="0">tier 0 · never seen</button>
 </div>
 <main id="list"></main>
+<section id="sender-view" hidden>
+  <button type="button" id="sender-back">← scored messages</button>
+  <div class="sender-head">
+    <h2 id="sender-addr">sender</h2>
+    <span id="sender-tier" class="tier"></span>
+  </div>
+  <p class="sender-rule" id="sender-rule">trust tier + rule that matched</p>
+  <p class="sender-counts num" id="sender-counts"></p>
+  <div class="sender-grid">
+    <div class="card">
+      <h3>send-hour histogram</h3>
+      <div class="hour-hist" id="sender-hours"></div>
+      <div class="hour-axis num"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+    </div>
+    <div class="card">
+      <h3>size and link-density baselines</h3>
+      <div id="sender-baselines"></div>
+    </div>
+    <div class="card">
+      <h3>known attachment types</h3>
+      <ul class="known" id="sender-atts"></ul>
+    </div>
+    <div class="card">
+      <h3>known link domains</h3>
+      <ul class="known" id="sender-links"></ul>
+    </div>
+    <div class="card">
+      <h3>known Reply-To set</h3>
+      <ul class="known" id="sender-replyto"></ul>
+    </div>
+  </div>
+  <div class="card">
+    <h3>recent scored messages</h3>
+    <div class="recent" id="sender-recent"></div>
+  </div>
+</section>
 <script>
 const esc = s => (s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -150,6 +231,27 @@ function initials(name, addr) {
   const src = (name || "").trim() || addr;
   const parts = src.split(/[\s._@-]+/).filter(Boolean);
   return ((parts[0]?.[0] || "?") + (parts[1]?.[0] || "")).toUpperCase();
+}
+
+function fmtBytes(n) {
+  if (n == null) return "—";
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+function fmtSpan(sec) {
+  if (sec == null) return "no dated span";
+  const d = Math.floor(sec / 86400);
+  if (d >= 365) return Math.floor(d / 365) + "y " + Math.floor((d % 365) / 30) + "mo";
+  if (d === 1) return "1 day";
+  if (d >= 1) return d + " days";
+  const h = Math.floor(sec / 3600);
+  return h + "h";
+}
+function knownList(el, items, text) {
+  if (!items.length) { el.innerHTML = '<li class="muted">none recorded</li>'; return; }
+  el.innerHTML = items.map(it =>
+    `<li class="chip ok">${esc(text(it))}</li>`).join("");
 }
 
 function scoreRing(score) {
@@ -191,18 +293,118 @@ async function loadMessages(tier) {
       ? `<a class="openmail" href="message://${encodeURIComponent(m.message_id)}"` +
         ` onclick="event.stopPropagation()">open in Apple Mail ↗</a>`
       : "";
+    const baseline = m.sender_id
+      ? `<a class="sender-open" href="#sender/${m.sender_id}"` +
+        ` onclick="event.stopPropagation()">sender baseline</a>`
+      : "";
     return `<div class="msg"><div class="row" onclick="this.parentNode.classList.toggle('open')">` +
       scoreRing(m.anomaly_score) +
       `<span class="avatar" style="background:hsl(${hue(m.from_email_norm)} 40% 52%)">` +
       `${esc(initials(m.from_display_name, m.from_email_norm))}</span>` +
-      `<span class="who"><span class="name">${esc(m.from_display_name || m.from_email_norm)}</span>` +
-      `<span class="addr">${esc(m.from_email_norm)}</span></span>` +
+      `<a class="who" href="#sender/${m.sender_id}"` +
+      ` onclick="event.stopPropagation()">` +
+      `<span class="name">${esc(m.from_display_name || m.from_email_norm)}</span>` +
+      `<span class="addr">${esc(m.from_email_norm)}</span></a>` +
       `<span class="tier t${m.tier}" title="${esc(m.tier_label)}">T${m.tier} ${TIER_SHORT[m.tier]}</span>` +
       `<span class="meta num">${m.n_attachments ? "📎" + m.n_attachments + " " : ""}` +
       `${m.n_links ? "🔗" + m.n_links + " " : ""}` +
       `<span class="when">${fmtDate(m.sent_at)}</span></span>` +
-      `</div><div class="flags">${flags}${open}</div></div>`;
+      `</div><div class="flags">${flags}${baseline}${open}</div></div>`;
   }).join("");
+}
+
+function showList() {
+  document.getElementById("filters").hidden = false;
+  document.getElementById("list").hidden = false;
+  document.getElementById("sender-view").hidden = true;
+}
+
+function showSenderPanel() {
+  document.getElementById("filters").hidden = true;
+  document.getElementById("list").hidden = true;
+  document.getElementById("sender-view").hidden = false;
+}
+
+function renderSender(s) {
+  document.getElementById("sender-addr").textContent =
+    s.display_name ? s.display_name + " · " + s.email_norm : s.email_norm;
+  const tierEl = document.getElementById("sender-tier");
+  tierEl.className = "tier t" + s.trust_tier;
+  tierEl.textContent = "T" + s.trust_tier + " " + (TIER_SHORT[s.trust_tier] || s.tier_label);
+  document.getElementById("sender-rule").textContent =
+    "trust tier T" + s.trust_tier + " · " + s.tier_label + " — " + s.tier_rule;
+  document.getElementById("sender-counts").textContent =
+    s.n_messages + " messages · " + s.n_threads + " threads · " +
+    s.n_replied_threads + " replied · " + s.n_user_initiated + " user-initiated · " +
+    "span " + fmtSpan(s.span_seconds);
+  const hours = s.hour_histogram || [];
+  const peak = Math.max(1, ...hours);
+  document.getElementById("sender-hours").innerHTML = hours.map((n, h) =>
+    `<span class="hbar${n ? " on" : ""}" title="${String(h).padStart(2, "0")}:00 · ${n}"` +
+    ` style="height:${Math.max(2, n / peak * 100).toFixed(0)}%"></span>`
+  ).join("");
+  const sz = s.size || {}, lk = s.links || {};
+  document.getElementById("sender-baselines").innerHTML =
+    `<div class="kv"><span class="k">typical size</span>` +
+    `<span class="num">${fmtBytes(sz.typical_bytes)}</span></div>` +
+    `<div class="kv"><span class="k">log-size σ</span>` +
+    `<span class="num">${sz.log_std == null ? "—" : sz.log_std.toFixed(2)}</span></div>` +
+    `<div class="kv"><span class="k">typical links</span>` +
+    `<span class="num">${lk.mean == null ? "—" : (lk.mean.toFixed(1) + (lk.std == null ? "" : " ± " + lk.std.toFixed(1)))}</span></div>` +
+    `<div class="kv"><span class="k">messages with links / attachments</span>` +
+    `<span class="num">${s.n_with_links} / ${s.n_with_attachments}</span></div>`;
+  knownList(document.getElementById("sender-atts"), s.attachment_types || [], a =>
+    (a.extension ? "." + a.extension : a.mime_type) + " ×" + a.n);
+  knownList(document.getElementById("sender-links"), s.link_domains || [], d =>
+    d.reg_domain + " ×" + d.n);
+  knownList(document.getElementById("sender-replyto"), s.reply_to || [], r =>
+    r.email_norm + " ×" + r.n);
+  const recent = s.recent_messages || [];
+  const box = document.getElementById("sender-recent");
+  if (!recent.length) { box.innerHTML = '<div class="muted">no scored messages</div>'; return; }
+  box.innerHTML = recent.map(m => {
+    const chips = (m.features || []).map(f =>
+      `<span class="chip" title="${esc(f.explanation)}">${esc(f.feature)}</span>`
+    ).join("") || '<span class="muted">no feature flags</span>';
+    return `<div class="item"><div class="top">` +
+      `<span class="score num sev-${m.anomaly_score >= 30 ? "hi" : m.anomaly_score >= 10 ? "mid" : "lo"}">` +
+      `${m.anomaly_score.toFixed(0)}</span>` +
+      `<span class="when num">${fmtDate(m.sent_at)}</span>` +
+      `<span class="muted num">${m.n_attachments ? "📎" + m.n_attachments + " " : ""}` +
+      `${m.n_links ? "🔗" + m.n_links : ""}</span></div>` +
+      `<div class="chips">${chips}</div></div>`;
+  }).join("");
+}
+
+async function openSender(id) {
+  const want = "#sender/" + id;
+  if (location.hash !== want) history.pushState(null, "", want);
+  showSenderPanel();
+  const r = await fetch("/api/senders/" + id);
+  if (!r.ok) {
+    document.getElementById("sender-addr").textContent = "sender not found";
+    document.getElementById("sender-rule").textContent = "";
+    document.getElementById("sender-counts").textContent = "";
+    document.getElementById("sender-hours").innerHTML = "";
+    document.getElementById("sender-baselines").innerHTML = "";
+    document.getElementById("sender-atts").innerHTML = "";
+    document.getElementById("sender-links").innerHTML = "";
+    document.getElementById("sender-replyto").innerHTML = "";
+    document.getElementById("sender-recent").innerHTML = "";
+    return;
+  }
+  renderSender(await r.json());
+}
+
+function closeSender() {
+  if (location.hash.startsWith("#sender/")) history.pushState(null, "", location.pathname);
+  showList();
+}
+
+function route() {
+  const m = location.hash.match(/^#sender\/(\d+)$/);
+  if (m) openSender(Number(m[1]));
+  else showList();
 }
 
 let tier = "";
@@ -213,8 +415,14 @@ document.getElementById("filters").addEventListener("click", e => {
   tier = e.target.dataset.tier;
   loadMessages(tier);
 });
+document.getElementById("sender-back").addEventListener("click", closeSender);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !document.getElementById("sender-view").hidden) closeSender();
+});
+window.addEventListener("hashchange", route);
+window.addEventListener("popstate", route);
 loadStatus();
-loadMessages("");
+loadMessages("").then(route);
 </script>
 </body>
 </html>

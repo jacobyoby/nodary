@@ -8,6 +8,15 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Added
+- Dashboard sender drill-down: from a scored message, open a local-only sender
+  view with the matching trust-tier rule, message counts and span, send-hour
+  histogram, size/link-density baselines, known attachment types, known link
+  domains, known Reply-To set, and recent messages with feature chips.
+  `GET /api/senders/<id>` returns those baselines from existing profile
+  tables; `GET /api/messages` now includes `sender_id`. No new persisted
+  content; payloads still omit subjects, filenames, full URLs, and body text.
+
 ## [0.3.1] — 2026-09-08
 
 ### Added
