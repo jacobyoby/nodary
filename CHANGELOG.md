@@ -8,6 +8,8 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-08
+
 ### Added
 - MIT license, CI/license badges, and GitHub topics; `license` metadata in
   `pyproject.toml`.
@@ -18,6 +20,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 - README documents all environment variables.
 - `nodary status` command showing per-account folders with high-water marks,
   last sync time, engine version, and database encryption state.
+- Dependabot weekly updates for the `uv` lockfile and GitHub Actions.
+
+### Changed
+- Locked `cryptography` 50.0.0 (from 49.0.0) for CVE-2026-69247. PKCS#7
+  `encryptedKey` unwrap no longer leaks distinguishable errors or timing that
+  could act as a Bleichenbacher oracle. Lockfile-only; not a direct
+  dependency.
 
 ### Fixed
 - `nodary sync` no longer exits at the first misconfigured account: each

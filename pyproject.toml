@@ -1,6 +1,6 @@
 [project]
 name = "nodary"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local-first email heuristic analysis client. All analysis on-device."
 license = "MIT"
 license-files = ["LICENSE"]
