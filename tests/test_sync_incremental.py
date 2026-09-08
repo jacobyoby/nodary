@@ -188,6 +188,20 @@ def test_self_from_classification_needs_a_verdict_or_sent_folder(conn):
     assert scored == 2
 
 
+def test_base64_decode_failure_marks_links_not_extracted(conn):
+    """A base64 part with broken padding must not be stored as a fully
+    scanned empty body — same treatment as an oversized part."""
+    t = FakeTransport()
+    msg = make_email("sender@vendor.io", when=T0)
+    msg.set_payload("abc")  # invalid base64 padding
+    msg.replace_header("Content-Transfer-Encoding", "base64")
+    t.add("INBOX", msg)
+    sync_account(conn, t, account_id=1)
+    row = conn.execute("SELECT links_extracted FROM messages").fetchone()
+    assert row is not None
+    assert row["links_extracted"] == 0
+
+
 def test_high_water_mark_stops_at_fetch_gap(conn):
     """UIDs the transport could not serve must be retried next sync, not
     skipped forever by an advancing high-water mark."""
