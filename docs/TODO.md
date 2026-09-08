@@ -1,9 +1,9 @@
 # Roadmap
 
-Nodary is currently **v0.3.0**. This file tracks shipped capability and open
+Nodary is currently **v0.3.1**. This file tracks shipped capability and open
 work; `CHANGELOG.md` remains the release-history source of truth.
 
-## Done by v0.3.0
+## Done by v0.3.1
 
 - [x] Read-only incremental IMAP sync with UIDVALIDITY/high-water-mark tracking.
       Why: gives deterministic local history without mutating the mailbox.
@@ -34,6 +34,9 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 - [x] Weight calibration harness that replays a labeled mailbox and reports
       score distributions per tier. Why: deterministic weights now have an
       offline empirical harness using synthetic benign and malicious scenarios.
+- [x] `nodary status` command showing per-folder high-water marks, last sync,
+      engine version, and encryption state (v0.3.1). Why: operators can inspect
+      sync health from the CLI without opening the dashboard.
 
 ## Near-Term / Hardening
 
@@ -44,9 +47,6 @@ work; `CHANGELOG.md` remains the release-history source of truth.
       `imap_sync.sync.BATCH_SIZE`, and consider fetching text parts only for
       messages <= N days old. Why: first-run performance and memory behavior
       need real-mailbox validation.
-- [ ] `nodary status` command showing per-folder high-water marks, last sync,
-      engine version, and encryption state. Why: `/api/status` exists for the
-      UI, but operators need a CLI health check.
 - [ ] Package a vendored Public Suffix List snapshot version in `schema_meta`
       and surface drift in the UI. Why: registrable-domain decisions affect
       scoring and should be auditable across rebuilds.
