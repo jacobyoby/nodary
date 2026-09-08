@@ -20,6 +20,11 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   last sync time, engine version, and database encryption state.
 
 ### Fixed
+- `nodary sync` no longer exits at the first misconfigured account: each
+  failure is printed to stderr with the account id and reason, remaining
+  accounts still sync, and the process exits non-zero if any account failed.
+  `add-account` now prompts for the secret before inserting the row, so
+  Ctrl-C at the prompt cannot leave an account with no credential.
 - Mail-store sync no longer stalls a folder behind a corrupt or unparseable
   `.emlx`: permanent parse failures are recorded in `skipped_messages` and the
   high-water mark advances past them, while absent files and failed
