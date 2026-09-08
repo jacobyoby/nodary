@@ -9,6 +9,11 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- Privacy-invariant regression tests (`tests/test_privacy_invariants.py`) and
+  a `SECURITY.md` threat-model stub. After a synthetic sync with rich
+  headers, body, and attachments, CI asserts the database, `/api/messages`
+  JSON, and on-disk DB bytes omit subjects, body text, filenames, full URLs,
+  and credentials.
 - Dashboard sender drill-down: from a scored message, open a local-only sender
   view with the matching trust-tier rule, message counts and span, send-hour
   histogram, size/link-density baselines, known attachment types, known link

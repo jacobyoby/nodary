@@ -115,6 +115,9 @@ one Gmail address, for example, must not establish trust in every Gmail sender.
   certificate generation is fully local (no ACME, no Certificate
   Transparency log entries).
 
+`tests/test_privacy_invariants.py` fails CI if a new column or extract path
+starts keeping forbidden content. `SECURITY.md` is the threat-model stub.
+
 ## Install
 
 Nodary requires Python 3.12 or later and uses `uv` for the documented setup.
