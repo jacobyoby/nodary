@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 
+from nodary.imap_sync.client import FetchFailure, FetchMeta
+
 
 def _leaf_bs(part: EmailMessage) -> tuple:
     payload = part.get_payload(decode=True) or b""
@@ -68,6 +70,7 @@ class FakeFolder:
         self.next_uid = 1
         self.messages: dict[int, EmailMessage] = {}
         self.hidden: set[int] = set()
+        self.permanent_failures: set[int] = set()
 
     def add(self, msg: EmailMessage) -> int:
         uid = self.next_uid
@@ -93,6 +96,10 @@ class FakeTransport:
 
     def unhide(self, uid: int, folder: str = "INBOX") -> None:
         self.folders[folder].hidden.discard(uid)
+
+    def fail_permanent(self, uid: int, folder: str = "INBOX") -> None:
+        """Mark a UID as permanently unfetchable, like a corrupt .emlx."""
+        self.folders[folder].permanent_failures.add(uid)
 
     def bump_uidvalidity(self, folder: str) -> None:
         f = self.folders[folder]
@@ -120,7 +127,11 @@ class FakeTransport:
     def fetch_meta(self, uids):
         self.meta_fetches += len(uids)
         out = {}
+        permanent = []
         for uid in uids:
+            if uid in self._selected.permanent_failures:
+                permanent.append(FetchFailure(uid=uid, reason="fake"))
+                continue
             if uid in self._selected.hidden:
                 continue
             msg = self._selected.messages.get(uid)
@@ -132,7 +143,7 @@ class FakeTransport:
                 "size": len(raw),
                 "bodystructure": _bodystructure(msg),
             }
-        return out
+        return FetchMeta(messages=out, permanent_failures=tuple(permanent))
 
     def fetch_part(self, uid: int, section: str) -> bytes:
         msg = self._selected.messages.get(uid)

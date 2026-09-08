@@ -216,3 +216,21 @@ def test_high_water_mark_stops_at_fetch_gap(conn):
     stats2 = sync_account(conn, t, account_id=1)
     assert stats2.new_messages == 2  # gap message and its successor
     assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 3
+
+
+def test_high_water_mark_advances_past_permanent_failures(conn):
+    """Permanently unfetchable UIDs are recorded and do not stall later mail."""
+    t = FakeTransport()
+    t.add("INBOX", make_email("dana@acme-corp.com", when=T0))
+    u2 = t.add("INBOX", make_email("erin@acme-corp.com", when=T0))
+    t.add("INBOX", make_email("faye@acme-corp.com", when=T0))
+    t.fail_permanent(u2)
+    stats = sync_account(conn, t, account_id=1)
+    assert stats.new_messages == 2
+    last = conn.execute(
+        "SELECT last_seen_uid FROM folders WHERE name = 'INBOX'"
+    ).fetchone()["last_seen_uid"]
+    assert last == 3
+    skipped = conn.execute("SELECT uid, reason FROM skipped_messages").fetchall()
+    assert [r["uid"] for r in skipped] == [u2]
+    assert skipped[0]["reason"] == "fake"

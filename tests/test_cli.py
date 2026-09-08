@@ -2,7 +2,13 @@
 NODARY_DB/NODARY_DB_KEY and the mail store via NODARY_MAIL_STORE."""
 
 import pytest
-from test_mail_store import store  # noqa: F401 (fixture reuse)
+from test_mail_store import (  # noqa: F401 (fixture reuse)
+    MULTIPART,
+    index_message,
+    store,
+    write_corrupt_emlx,
+    write_emlx,
+)
 
 from nodary.cli import main
 
@@ -97,6 +103,44 @@ def test_status_reports_accounts_folders_and_db(env, monkeypatch, capsys):
     assert "uidvalidity=7" in out
     assert "last_seen_uid=42" in out
     assert "messages: 0" in out
+
+
+def test_sync_reports_transient_and_permanent_skips_separately(
+    env,
+    monkeypatch,
+    store,  # noqa: F811
+    capsys,
+):
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
+    # 1204 corrupt (permanent), 1205 missing (transient), 1206 valid but
+    # behind the gap — first sync should report both skip kinds.
+    index_message(store.root, mailbox_rowid=1, rowid=1204)
+    index_message(store.root, mailbox_rowid=1, rowid=1205)
+    index_message(store.root, mailbox_rowid=1, rowid=1206)
+    write_corrupt_emlx(store.root, "INBOX", 1204)
+    write_emlx(store.root, "INBOX", 1206, MULTIPART)
+    assert _add_account(monkeypatch) == 0
+    main(["set-source", "1", "mail-store"])
+    assert main(["sync"]) == 0
+    captured = capsys.readouterr()
+    assert "not yet on disk and will be retried" in captured.err
+    assert "corrupt or unparseable .emlx and were skipped" in captured.err
+    from nodary.cli import _open
+
+    conn = _open()
+    inbox_uids = [
+        r[0]
+        for r in conn.execute(
+            "SELECT uid FROM messages m JOIN folders f ON f.id = m.folder_id"
+            " WHERE f.name = 'INBOX' ORDER BY uid"
+        )
+    ]
+    assert inbox_uids == [1201]
+    last = conn.execute(
+        "SELECT last_seen_uid FROM folders WHERE name = 'INBOX'"
+    ).fetchone()[0]
+    assert last == 1204  # advanced past the corrupt file, stopped at the gap
+    assert conn.execute("SELECT uid FROM skipped_messages").fetchone()[0] == 1204
 
 
 def test_shared_alias_cannot_bind_two_accounts_to_one_store(

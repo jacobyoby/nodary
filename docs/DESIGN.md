@@ -22,6 +22,9 @@ cloud scoring APIs, or emit telemetry.
   type, size, and filename metadata, and only the derived extension is stored.
 - The Apple Mail store transport also avoids retaining attachment bytes; it
   decodes only bounded scannable text parts and keeps other parts size-only.
+- Permanently unparseable `.emlx` files are recorded in `skipped_messages`
+  with folder, rowid, filesystem path, and a short reason (framing error or
+  exception type). Message bytes are not stored.
 - Outgoing recipients are the documented exception to "no recipient lists":
   `message_recipients` stores links from outgoing messages to sender/contact
   rows so reply credits and Tier 3 are recomputable.
@@ -69,9 +72,12 @@ cloud scoring APIs, or emit telemetry.
    A UIDVALIDITY change deletes facts for that folder, resets its high-water
    mark, refetches, and triggers a full rebuild.
 5. Normal sync requests UIDs above `last_seen_uid` in batches of
-   `BATCH_SIZE = 200`. The high-water mark advances only through UIDs whose
-   metadata was actually available; this prevents Apple Mail index rows whose
-   `.emlx` files have not landed yet from being skipped forever.
+   `BATCH_SIZE = 200`. `fetch_meta` returns successful messages plus any
+   permanent failures (a present `.emlx` that raises `EmlxError` or a parse
+   exception). Transient gaps — a missing file, or a `.partial.emlx` that
+   cannot be parsed yet — are omitted so the high-water mark stops and retries.
+   Permanent failures are written to `skipped_messages` (folder, rowid, path,
+   reason; no message content) and the high-water mark advances past them.
 6. The sync layer parses headers, walks structure, fetches only bounded text
    parts for link extraction, decides message direction, and calls
    `pipeline.ingest_message`.
@@ -83,7 +89,8 @@ cloud scoring APIs, or emit telemetry.
 
 `schema.sql` groups data into four classes:
 
-- Account/source state: `accounts`, `user_identities`, and `folders`.
+- Account/source state: `accounts`, `user_identities`, `folders`, and
+  `skipped_messages` (permanent mail-store fetch failures).
   `accounts.auth_method` allows `oauth2`, `app_password`, and `mail_store`.
 - Facts: `senders`, `threads`, `messages`, `message_attachments`,
   `message_link_domains`, and outgoing-only `message_recipients`.
