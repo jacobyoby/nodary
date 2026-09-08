@@ -66,7 +66,7 @@ work; `CHANGELOG.md` remains the release-history source of truth.
       cheaper than UID range scans for large mailboxes.
 - [ ] Confusables table generation from vendored Unicode UTS #39 skeleton data.
       Why: the current curated subset is auditable but incomplete.
-- [ ] Dashboard sender drill-down page with baseline histograms and feature
+- [x] Dashboard sender drill-down page with baseline histograms and feature
       history. Why: a high score is easier to trust when the underlying sender
       baseline is visible.
 - [ ] Dormant-resurrection median-gap precomputation in `sender_profiles`. Why:
