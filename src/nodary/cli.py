@@ -8,14 +8,30 @@ import sys
 import time
 
 from .storage import db as storage_db
-from .storage.keys import get_or_create_db_key, set_account_secret
+from .storage.keys import get_account_secret, get_or_create_db_key, set_account_secret
 
 
 def _open():
     return storage_db.connect(storage_db.default_db_path(), get_or_create_db_key())
 
 
+def _account_error(acct, reason: str) -> None:
+    print(f"account #{acct['id']} ({acct['email']}): {reason}", file=sys.stderr)
+
+
 def cmd_add_account(args) -> int:
+    # Prompt first so Ctrl-C / EOF cannot leave a row with no keychain secret.
+    prompt = (
+        "OAuth2 access token (stored in OS keychain): "
+        if args.auth == "oauth2"
+        else "App password (stored in OS keychain): "
+    )
+    try:
+        secret = getpass.getpass(prompt)
+    except (KeyboardInterrupt, EOFError):
+        print("aborted.", file=sys.stderr)
+        return 1
+
     conn = _open()
     cur = conn.execute(
         "INSERT INTO accounts (email, imap_host, imap_port, auth_method, created_at)"
@@ -34,13 +50,6 @@ def cmd_add_account(args) -> int:
             (account_id, alias.lower()),
         )
     conn.commit()
-
-    prompt = (
-        "OAuth2 access token (stored in OS keychain): "
-        if args.auth == "oauth2"
-        else "App password (stored in OS keychain): "
-    )
-    secret = getpass.getpass(prompt)
     set_account_secret(account_id, secret)
     print(f"account #{account_id} added: {args.email} @ {args.host}")
     if args.auth == "oauth2":
@@ -58,7 +67,6 @@ def cmd_set_secret(args) -> int:
 def cmd_sync(args) -> int:
     from .imap_sync import ImapTransport, sync_account
     from .pipeline import rebuild
-    from .storage.keys import get_account_secret
 
     conn = _open()
     accounts = conn.execute("SELECT * FROM accounts").fetchall()
@@ -67,6 +75,7 @@ def cmd_sync(args) -> int:
         return 1
     mail_store = None
     claimed_uuids: set[str] = set()
+    any_failed = False
     for acct in accounts:
         if acct["auth_method"] == "mail_store":
             from .mail_store import MailStore, MailStoreTransport
@@ -94,12 +103,12 @@ def cmd_sync(args) -> int:
                 None,
             )
             if uuid is None:
-                print(
-                    f"{acct['email']}: no unclaimed account found in the local"
-                    " Apple Mail store",
-                    file=sys.stderr,
+                _account_error(
+                    acct,
+                    "no unclaimed account found in the local Apple Mail store",
                 )
-                return 1
+                any_failed = True
+                continue
             claimed_uuids.add(uuid)
             transport = MailStoreTransport(mail_store, uuid)
             stats = sync_account(conn, transport, acct["id"])
@@ -119,11 +128,9 @@ def cmd_sync(args) -> int:
         else:
             secret = get_account_secret(acct["id"])
             if not secret:
-                print(
-                    f"no credential for {acct['email']}; run nodary set-secret",
-                    file=sys.stderr,
-                )
-                return 1
+                _account_error(acct, "no credential; run nodary set-secret")
+                any_failed = True
+                continue
             transport = ImapTransport(acct["imap_host"], acct["imap_port"])
             try:
                 if acct["auth_method"] == "oauth2":
@@ -143,7 +150,7 @@ def cmd_sync(args) -> int:
             print("  replaying history for exact baselines…")
             n = rebuild(conn)
             print(f"  rebuilt profiles and scores from {n} messages")
-    return 0
+    return 1 if any_failed else 0
 
 
 def cmd_set_source(args) -> int:

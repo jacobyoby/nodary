@@ -173,3 +173,39 @@ def test_shared_alias_cannot_bind_two_accounts_to_one_store(
 
     n = _open().execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert n == 2  # only account 1's messages, ingested once
+
+
+def test_sync_continues_after_first_account_missing_credential(
+    env,
+    monkeypatch,
+    store,  # noqa: F811
+    capsys,
+):
+    """A missing IMAP credential must not prevent later accounts from syncing."""
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
+    monkeypatch.setattr("nodary.cli.get_account_secret", lambda _id: None)
+    assert _add_account(monkeypatch, "broken@example.com") == 0
+    assert _add_account(monkeypatch, "jacob@example.com") == 0
+    assert main(["set-source", "2", "mail-store"]) == 0
+
+    assert main(["sync"]) == 1
+    captured = capsys.readouterr()
+    assert "account #1 (broken@example.com): no credential" in captured.err
+    assert "2 new messages" in captured.out
+    from nodary.cli import _open
+
+    n = _open().execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assert n == 2
+
+
+def test_add_account_aborted_prompt_does_not_write_row(env, monkeypatch, capsys):
+    def abort(prompt=""):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("getpass.getpass", abort)
+    monkeypatch.setattr("nodary.cli.set_account_secret", lambda *_: None)
+    assert main(["add-account", "x@example.com", "--host", "h"]) == 1
+    assert "aborted" in capsys.readouterr().err
+    from nodary.cli import _open
+
+    assert _open().execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0
