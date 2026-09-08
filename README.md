@@ -259,3 +259,10 @@ copies, expunges, deletes, or sends mail.
 - No sharing or synchronization of scores or behavioral profiles between
   installations.
 - Nodary never sends mail and never modifies mailbox contents.
+
+## Jacob Rakai Foundation
+
+Jacob Rakai Foundation (EIN 33-3382083) is an IRC 501(c)(3) public charity
+under 170(b)(1)(A)(vi), effective February 11, 2025. Contributions are
+deductible. See [IRS Letter 947](https://apps.irs.gov/pub/epostcard/dl/FinalLetter_33-3382083_JACOBRAKAIFOUNDATION_02112025_v1.0.pdf)
+dated September 3, 2026.
