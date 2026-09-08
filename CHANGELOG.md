@@ -20,6 +20,10 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   last sync time, engine version, and database encryption state.
 
 ### Fixed
+- A base64 text part with invalid padding is recorded as
+  `links_extracted=0` instead of an empty, fully scanned body. The previous
+  catch-all returned empty bytes and let scoring treat the message as
+  link-free, which suppressed anomalies and polluted sender baselines.
 - Duplicate suppression: a message whose Message-ID, size, and date match an
   already-synced message is no longer ingested again. This drops
   double-delivered copies and the same delivery reaching two synced accounts

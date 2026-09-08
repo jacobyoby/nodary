@@ -13,8 +13,9 @@ cloud scoring APIs, or emit telemetry.
 
 - Body text is transient. Text/plain and text/html parts are read only to
   extract HTTP(S) link hostnames, then discarded.
-- Text parts larger than `MAX_TEXT_SCAN_BYTES` (1 MiB) are skipped for link
-  extraction and recorded with `messages.links_extracted = 0`.
+- Text parts larger than `MAX_TEXT_SCAN_BYTES` (1 MiB), or whose transfer
+  encoding cannot be decoded, are skipped for link extraction and recorded
+  with `messages.links_extracted = 0`.
 - Subjects, full URLs, attachment filenames, and full recipient lists are not
   persisted.
 - Attachments are not downloaded by IMAP sync; `BODYSTRUCTURE` supplies MIME

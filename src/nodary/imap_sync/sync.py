@@ -9,6 +9,7 @@ beyond bounded text parts for link extraction).
 from __future__ import annotations
 
 import base64
+import binascii
 import quopri
 import sqlite3
 import time
@@ -39,13 +40,17 @@ class SyncStats:
     initial_backfill: bool = False
 
 
-def _decode_part(data: bytes, encoding: str) -> bytes:
+def _decode_part(data: bytes, encoding: str) -> bytes | None:
+    """Decode a transfer-encoded part. Returns None when base64 padding is
+    invalid so the caller can mark the message not fully scanned — same
+    treatment as an oversized part — instead of pretending the body was
+    empty."""
     enc = encoding.lower()
     if enc == "base64":
         try:
             return base64.b64decode(data, validate=False)
-        except Exception:
-            return b""
+        except binascii.Error:
+            return None
     if enc == "quoted-printable":
         return quopri.decodestring(data)
     return data
@@ -73,6 +78,9 @@ def _gather_text(
             fully = False
             continue
         decoded = _decode_part(raw, p.encoding)
+        if decoded is None:
+            fully = False
+            continue
         try:
             texts.append(decoded.decode(p.charset or "utf-8", errors="replace"))
         except LookupError:

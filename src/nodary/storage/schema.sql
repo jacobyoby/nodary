@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS messages (
   size_bytes          INTEGER NOT NULL,
   n_attachments       INTEGER NOT NULL DEFAULT 0,
   n_links             INTEGER NOT NULL DEFAULT 0,
-  links_extracted     INTEGER NOT NULL DEFAULT 1,  -- 0 when text parts were too large to scan
+  links_extracted     INTEGER NOT NULL DEFAULT 1,  -- 0 when a text part was too large or failed to decode
   is_reply            INTEGER NOT NULL DEFAULT 0,
   thread_id           INTEGER REFERENCES threads(id),
   thread_depth        INTEGER NOT NULL DEFAULT 0,
