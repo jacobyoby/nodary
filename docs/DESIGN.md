@@ -36,6 +36,25 @@ cloud scoring APIs, or emit telemetry.
   fetching disabled. The freemail list and confusables subset are vendored in
   `feature_extraction.normalize`.
 
+## Dashboard Sync-Health UI
+
+The dashboard shows a sync-health status strip between the header and tier
+filters. The strip contains a color-coded dot (green = healthy, yellow =
+skipped messages exist, red = per-account errors), a plain-language summary
+of permanent skip counts and per-account errors, and per-account pills
+showing last sync time.
+
+Skip counts come from the `skipped_messages` table, which records folder,
+UID, reason, and timestamp for messages the sync layer could not ingest
+(e.g. missing `.emlx`, unparseable headers). No message content is stored.
+Last sync time is derived from `folders.last_synced_at` (MAX per account).
+Last error is a persisted string on `accounts.last_error`, written by the
+sync layer when an account-level failure occurs (e.g. missing credential).
+
+The skip count links to a local-only overlay listing skipped messages via
+`/api/skipped`. The overlay shows account, folder name, UID, reason, and
+timestamp — no message bodies, subjects, or sender addresses.
+
 ## Main Components
 
 - `cli.py` provides `add-account`, `set-secret`, `set-source`, `sync`,
@@ -98,6 +117,8 @@ cloud scoring APIs, or emit telemetry.
   `sender_attachment_types`, `sender_link_domains`, `sender_replyto_addrs`,
   `thread_reply_credits`, and `domain_profiles`.
 - Scores: `message_scores` and `message_score_features`.
+- Sync health: `skipped_messages` (permanently skipped messages with
+  folder, UID, and reason; no message content).
 
 Derived tables are caches over message facts. `pipeline.rebuild()` deletes the
 derived tables and replays all messages ordered by `(sent_at, id)` so profiles,

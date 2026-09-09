@@ -133,6 +133,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             """
         )
         conn.execute("PRAGMA foreign_keys = ON")
+    # last_error column added for sync-health surfacing in the dashboard.
+    # ALTER TABLE ADD COLUMN is a no-op when the column already exists only
+    # on fresh databases (the schema.sql never declares it, so this always
+    # runs for the life of the migration).
+    cols = {
+        r["name"]
+        for r in conn.execute("PRAGMA table_info(accounts)").fetchall()
+    }
+    if "last_error" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_error TEXT")
 
 
 def _set_meta_default(conn: sqlite3.Connection, key: str, value: str) -> None:

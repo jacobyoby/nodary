@@ -26,6 +26,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   `GET /api/senders/<id>` returns those baselines from existing profile
   tables; `GET /api/messages` now includes `sender_id`. No new persisted
   content; payloads still omit subjects, filenames, full URLs, and body text.
+- Dashboard sync-health status strip: per-account sync time, permanent
+  skip count, and last error surfaced below the header bar with a
+  color-coded health indicator (green/yellow/red). Skip count links to a
+  local-only skip list overlay showing folder, UID, and reason — no
+  message content. New `/api/skipped` endpoint serves the skip list.
+  `skipped_messages` table records permanently skipped messages during
+  sync; `accounts.last_error` stores the most recent per-account error.
 
 ## [0.3.1] — 2026-09-08
 

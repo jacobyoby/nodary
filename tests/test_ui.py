@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -225,3 +226,108 @@ def test_run_no_tls_skips_certificate_lookup(conn, monkeypatch):
     monkeypatch.setattr("flask.Flask.run", lambda self, **kw: captured(**kw))
     run(conn, tls=False)
     assert captured.kwargs["ssl_context"] is None
+
+
+# ── sync-health status fields ─────────────────────────────────────────
+
+
+def test_status_includes_accounts_and_skip_fields(client, conn):
+    r = client.get("/api/status").get_json()
+    assert "accounts" in r
+    assert "total_skipped" in r
+    assert "has_errors" in r
+    assert isinstance(r["accounts"], list)
+    assert r["total_skipped"] == 0
+    assert r["has_errors"] is False
+
+
+def test_status_accounts_per_account_shape(client, conn):
+    r = client.get("/api/status").get_json()
+    assert len(r["accounts"]) == 1  # conftest creates one account
+    a = r["accounts"][0]
+    assert {"id", "email", "auth_method", "last_error", "last_synced_at", "skip_count"} <= set(a)
+    assert a["email"] == "jacob@myco.com"
+    assert a["last_synced_at"] is None  # no sync yet
+
+
+def test_status_skip_count_reflects_skipped_messages(client, conn):
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 1, 100, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 1, 101, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 1, 102, 'unparseable_header', ?)",
+        (now,),
+    )
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["total_skipped"] == 3
+    assert r["accounts"][0]["skip_count"] == 3
+
+
+def test_status_last_error_surfaces(client, conn):
+    conn.execute("UPDATE accounts SET last_error = ? WHERE id = 1", ("missing credential",))
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["has_errors"] is True
+    assert r["accounts"][0]["last_error"] == "missing credential"
+
+
+def test_status_last_synced_at_derived_from_folders(client, conn):
+    ts = int(time.time()) - 3600
+    conn.execute("UPDATE folders SET last_synced_at = ? WHERE id = 1", (ts,))
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["accounts"][0]["last_synced_at"] == ts
+
+
+# ── skip list endpoint ───────────────────────────────────────────────
+
+
+def test_skipped_endpoint_returns_rows(client, conn):
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 1, 200, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.commit()
+    rows = client.get("/api/skipped").get_json()
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["uid"] == 200
+    assert r["reason"] == "missing_emlx"
+    assert r["folder_name"] == "INBOX"
+    assert r["account_email"] == "jacob@myco.com"
+    # no message content in skip list
+    for key in ("body", "subject", "from_addr", "message_id"):
+        assert key not in r
+
+
+def test_skipped_endpoint_empty(client):
+    rows = client.get("/api/skipped").get_json()
+    assert rows == []
+
+
+# ── dashboard renders status strip ───────────────────────────────────
+
+
+def test_index_renders_status_strip(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="status-strip"' in html
+    assert "status-bar" in html
+    assert "status-dot" in html
+
+
+def test_index_renders_skip_overlay(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="skip-overlay"' in html
+    assert "/api/skipped" in html

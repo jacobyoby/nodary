@@ -210,3 +210,17 @@ CREATE TABLE IF NOT EXISTS message_score_features (
   explanation  TEXT NOT NULL,
   PRIMARY KEY (message_id, feature)
 );
+
+-- Messages permanently skipped during sync (e.g. unparseable .emlx,
+-- missing transport data). No message content is stored — only the
+-- folder, UID, and a short machine-readable reason.
+CREATE TABLE IF NOT EXISTS skipped_messages (
+  id          INTEGER PRIMARY KEY,
+  account_id  INTEGER NOT NULL REFERENCES accounts(id),
+  folder_id   INTEGER NOT NULL REFERENCES folders(id),
+  uid         INTEGER NOT NULL,
+  reason      TEXT NOT NULL,
+  skipped_at  INTEGER NOT NULL,
+  UNIQUE (folder_id, uid, reason)
+);
+CREATE INDEX IF NOT EXISTS idx_skipped_account ON skipped_messages(account_id);

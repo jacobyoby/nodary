@@ -187,14 +187,53 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             " SUM(CASE WHEN direction='in' THEN 1 ELSE 0 END) AS n_in"
             " FROM messages"
         ).fetchone()
+        unique_in = conn.execute(
+            "SELECT COUNT(DISTINCT COALESCE(message_id, 'row:' || id))"
+            " FROM messages WHERE direction = 'in'"
+        ).fetchone()[0]
+
+        # Per-account sync health: last sync time (derived from folders),
+        # permanent skip count, and last error (persisted on accounts).
+        accounts = conn.execute(
+            """SELECT a.id, a.email, a.auth_method, a.last_error,
+                      MAX(f.last_synced_at) AS last_synced_at,
+                      (SELECT COUNT(*) FROM skipped_messages sk
+                         WHERE sk.account_id = a.id) AS skip_count
+               FROM accounts a
+               LEFT JOIN folders f ON f.account_id = a.id
+               GROUP BY a.id
+               ORDER BY a.id"""
+        ).fetchall()
+
+        total_skipped = sum(a["skip_count"] for a in accounts)
+        has_errors = any(a["last_error"] for a in accounts)
+
         return jsonify(
             {
                 "messages": counts["n"],
                 "incoming": counts["n_in"] or 0,
+                "unique_incoming": unique_in,
                 "senders": conn.execute("SELECT COUNT(*) FROM senders").fetchone()[0],
                 "encryption": get_meta(conn, "encryption"),
+                "accounts": [dict(a) for a in accounts],
+                "total_skipped": total_skipped,
+                "has_errors": has_errors,
             }
         )
+
+    @app.get("/api/skipped")
+    def skipped():
+        """Skip list: folder, rowid/UID, reason — no message content."""
+        rows = conn.execute(
+            """SELECT sk.id, sk.account_id, sk.uid, sk.reason, sk.skipped_at,
+                      f.name AS folder_name, a.email AS account_email
+               FROM skipped_messages sk
+               JOIN folders f ON f.id = sk.folder_id
+               JOIN accounts a ON a.id = sk.account_id
+               ORDER BY sk.skipped_at DESC, sk.id DESC
+               LIMIT 500"""
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
 
     @app.get("/api/messages")
     def messages():
@@ -212,16 +251,29 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             else:
                 where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
         rows = conn.execute(
-            f"""SELECT {_SCORED_MESSAGE_COLS}
-                FROM messages m
-                JOIN message_scores sc ON sc.message_id = m.id
-                LEFT JOIN sender_profiles p ON p.sender_id = m.sender_id
-                WHERE m.direction = 'in' {where}
-                ORDER BY sc.anomaly_score DESC, m.sent_at DESC
+            f"""SELECT * FROM (
+                  SELECT {_SCORED_MESSAGE_COLS},
+                    ROW_NUMBER() OVER (
+                      PARTITION BY m.from_email_norm
+                      ORDER BY sc.anomaly_score DESC, m.sent_at DESC
+                    ) AS _rn,
+                    COUNT(*) OVER (PARTITION BY m.from_email_norm) AS _sender_msg_count
+                  FROM messages m
+                  JOIN message_scores sc ON sc.message_id = m.id
+                  LEFT JOIN sender_profiles p ON p.sender_id = m.sender_id
+                  WHERE m.direction = 'in' {where}
+                )
+                WHERE _rn = 1
+                ORDER BY anomaly_score DESC, sent_at DESC
                 LIMIT ?""",
             (*params, limit),
         ).fetchall()
-        return jsonify([_scored_payload(conn, r) for r in rows])
+        out = []
+        for r in rows:
+            d = _scored_payload(conn, r)
+            d["sender_msg_count"] = r["_sender_msg_count"]
+            out.append(d)
+        return jsonify(out)
 
     @app.get("/api/senders/<int:sender_id>")
     def sender(sender_id: int):
