@@ -73,6 +73,56 @@ When viewing all accounts, the status strip shows per-account pills with
 last sync time and skip count. When viewing a single account, only that
 account's pill is shown and all counts reflect only that account's data.
 
+The filter scopes the review UI. Sender baselines remain shared across
+accounts; see Mailbox vs user vs policy.
+
+## Mailbox vs user vs policy
+
+Nodary supports **multi-mailbox** on one install: one local database holds
+many `accounts`, each with its own identities, folders, credentials, and
+sync state. Sync continues across accounts on failure; the dashboard can
+filter messages and status by `?account=<id>|all`. Cross-account
+Message-ID dedupe and explicit `export-profile` / `import-profile`
+migration are supported. Live cross-install sync is not.
+
+Nodary does **not** support **multi-user** or org tenancy: no OS-user
+isolation, no household sharing, no tenant membership, no RBAC, and no
+admin console that pushes policy to other installs. One human (or one
+operator of one machine) owns the install and the profile DB.
+
+### Sender graph scope (current)
+
+Mailbox facts are account-scoped (`accounts`, `user_identities`,
+`folders`, messages via `folder_id`). The **relationship graph is
+install-global by design**: `senders.email_norm` is UNIQUE across the
+database, and `sender_profiles` / `domain_profiles` / tiers blend
+evidence from every account on that install. UI account filtering
+restricts message lists and status; it does not partition sender
+baselines. Issue #34's "no merging beyond normalization" applies to
+UI/list presentation, not to undoing this shared `email_norm` graph.
+
+Work and personal mailboxes in the same DB therefore share Tier credit
+and domain-profile baselines. That strengthens cross-mailbox compromise
+detection and is a deliberate product tradeoff until a written product
+call chooses account-scoped or hybrid baselines.
+
+### What "organization" and "rules" mean today
+
+- Trust **tier rules** (`scoring/tiers.py`) are computed first-match
+  heuristics (Tier 3→0), not user-editable policy.
+- Tier 1 "organization known" means a non-freemail registrable domain
+  that already has a replied thread — not multi-tenant org membership or
+  admin policy.
+- The scoring **registry** (`scoring/registry.py`, `ENGINE_VERSION`) is
+  hardcoded weights/thresholds — not per-user or org policy packs.
+
+There is no table or API for allowlists, VIP lists, weight overrides, or
+shared policy. Editable **individual** local policy and **org/shared**
+policy are out of scope for this docs change; any future local policy
+pack must stay on-device (no network, no shared reputation) and respect
+Privacy Invariants. Org-pushed / cloud policy remains Explicitly
+Rejected.
+
 ## Main Components
 
 - `cli.py` provides `add-account`, `set-secret`, `set-source`, `sync`,
