@@ -9,6 +9,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **Large-mailbox performance:** age-gated text-part fetch
+  (`--text-fetch-age-days N`, default 90) skips body text retrieval for
+  messages older than the threshold during sync, dramatically reducing
+  first-run time and memory for large mailboxes. Identity features are still
+  scored normally. Use `--text-fetch-age-days 0` to disable. Tunable batch
+  size via `--batch-size N` (default 200). Benchmark script at
+  `scripts/benchmark_large_mailbox.py` for measuring performance.
 - **OAuth2 refresh-token auto-renewal:** access tokens stored in the OS
   keychain are now refreshed automatically when they expire. Refresh tokens
   are stored in the OS keychain only (never in SQLite). On IMAP auth failure

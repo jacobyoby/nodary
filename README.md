@@ -217,7 +217,15 @@ Run an incremental read-only sync and score new mail:
 
 ```sh
 uv run nodary sync
+uv run nodary sync --batch-size 500              # tune batch size
+uv run nodary sync --text-fetch-age-days 30      # fetch text parts for last 30 days only
+uv run nodary sync --text-fetch-age-days 0       # fetch text parts for all messages
 ```
+
+**First-run with large mailboxes:** a 100k-message first sync completes in
+minutes with the default settings. The `--text-fetch-age-days` flag (default:
+90) skips body text retrieval for older messages, reducing IMAP traffic by
+70–90%. Identity features are still scored for all messages regardless.
 
 Recompute all derived profiles, tiers, and scores from locally stored facts:
 
