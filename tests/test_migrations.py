@@ -406,6 +406,128 @@ def test_old_db_gets_migrated(tmp_path):
     conn.close()
 
 
+def test_auth_method_migration_preserves_data(tmp_path):
+    """Migration 002 must preserve existing accounts and dependent rows."""
+    path = tmp_path / "pre_mail_store.db"
+    _create_v1_db(path)
+
+    # Insert test data BEFORE migration.
+    conn_pre = sqlite3.connect(str(path), isolation_level=None)
+    conn_pre.row_factory = sqlite3.Row
+    conn_pre.execute(
+        "INSERT INTO accounts"
+        " (id, email, imap_host, imap_port, auth_method, created_at)"
+        " VALUES (42, 'alice@example.com', 'imap.example.com', 993,"
+        " 'oauth2', 1234567890)"
+    )
+    conn_pre.execute(
+        "INSERT INTO user_identities (account_id, email_norm)"
+        " VALUES (42, 'alice@example.com')"
+    )
+    conn_pre.commit()
+    conn_pre.close()
+
+    # Trigger migrations.
+    conn = storage_db.connect(path)
+
+    # auth_method now accepts 'mail_store'.
+    conn.execute(
+        "INSERT INTO accounts"
+        " (id, email, imap_host, auth_method, created_at)"
+        " VALUES (99, 'new@example.com', 'imap.new', 'mail_store', 0)"
+    )
+
+    # Original account survived with same id.
+    row = conn.execute(
+        "SELECT id, email, auth_method FROM accounts WHERE id = 42"
+    ).fetchone()
+    assert row is not None, "account row must survive migration"
+    assert row["id"] == 42
+    assert row["email"] == "alice@example.com"
+    assert row["auth_method"] == "oauth2"
+
+    # Dependent user_identities row still resolves (FK integrity).
+    identity = conn.execute(
+        "SELECT account_id, email_norm FROM user_identities WHERE account_id = 42"
+    ).fetchone()
+    assert identity is not None, "user_identities row must survive migration"
+    assert identity["account_id"] == 42
+    assert identity["email_norm"] == "alice@example.com"
+
+    # PRAGMA foreign_keys is back ON after migration.
+    fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    assert fk == 1, "foreign_keys must be ON after migration"
+
+    conn.close()
+
+
+def test_auth_method_migration_noop_when_already_migrated(tmp_path):
+    """Migration 002 must not rebuild accounts table if already migrated."""
+    path = tmp_path / "already_migrated.db"
+
+    # Create a DB with current schema (mail_store already in CHECK, last_error exists).
+    conn_setup = sqlite3.connect(str(path), isolation_level=None)
+    conn_setup.row_factory = sqlite3.Row
+    conn_setup.executescript(
+        """
+        CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO schema_meta VALUES ('schema_version', '1');
+
+        CREATE TABLE accounts (
+          id          INTEGER PRIMARY KEY,
+          email       TEXT NOT NULL UNIQUE,
+          imap_host   TEXT NOT NULL,
+          imap_port   INTEGER NOT NULL DEFAULT 993,
+          auth_method TEXT NOT NULL
+            CHECK (auth_method IN ('oauth2','app_password','mail_store')),
+          created_at  INTEGER NOT NULL,
+          last_error  TEXT
+        );
+
+        CREATE TABLE user_identities (
+          account_id INTEGER NOT NULL REFERENCES accounts(id),
+          email_norm TEXT NOT NULL,
+          PRIMARY KEY (account_id, email_norm)
+        );
+        """
+    )
+    # Insert a row to track its id.
+    conn_setup.execute(
+        "INSERT INTO accounts"
+        " (id, email, imap_host, auth_method, created_at)"
+        " VALUES (100, 'bob@example.com', 'imap.bob', 'mail_store', 111)"
+    )
+    conn_setup.commit()
+
+    # Capture the table's DDL before migration.
+    ddl_before = conn_setup.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'"
+    ).fetchone()["sql"]
+    conn_setup.close()
+
+    # Trigger migrations.
+    conn = storage_db.connect(path)
+
+    # Capture the table's DDL after migration.
+    ddl_after = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'"
+    ).fetchone()["sql"]
+
+    # DDL must be unchanged (table was not dropped/recreated).
+    assert ddl_before == ddl_after, (
+        "accounts table DDL must not change when already migrated"
+    )
+
+    # Original row must still exist.
+    row = conn.execute(
+        "SELECT id, email FROM accounts WHERE id = 100"
+    ).fetchone()
+    assert row is not None, "account row must survive migration"
+    assert row["email"] == "bob@example.com"
+
+    conn.close()
+
+
 def test_fresh_db_at_latest_version():
     conn = storage_db.connect(":memory:")
     assert storage_db.get_meta(conn, "schema_version") == str(LATEST_VERSION)
