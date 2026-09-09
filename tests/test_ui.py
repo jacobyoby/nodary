@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import ME, T0, make_email
@@ -499,3 +499,79 @@ def test_index_renders_account_switcher(client):
     assert 'id="acct-switcher"' in html
     assert 'id="acct-select"' in html
     assert "/api/accounts" in html
+
+
+# ── per-sender collapse ──────────────────────────────────────────────
+
+
+def test_sender_collapse_one_row_per_sender(client, mailbox):
+    """Two messages from the same sender collapse to one row."""
+    t1 = T0 + timedelta(hours=1)
+    t2 = T0 + timedelta(hours=2)
+    mailbox.deliver(make_email("repeat@sender.com", when=t1))
+    mailbox.deliver(make_email("repeat@sender.com", when=t2))
+    mailbox.deliver(make_email("other@elsewhere.com"))
+
+    msgs = client.get("/api/messages").get_json()
+    addrs = [m["from_email_norm"] for m in msgs]
+    assert len(addrs) == 2
+    assert sorted(addrs) == ["other@elsewhere.com", "repeat@sender.com"]
+
+
+def test_sender_collapse_sender_msg_count(client, mailbox):
+    """sender_msg_count reflects total messages from that sender."""
+    t1 = T0 + timedelta(hours=1)
+    t2 = T0 + timedelta(hours=2)
+    mailbox.deliver(make_email("repeat@sender.com", when=t1))
+    mailbox.deliver(make_email("repeat@sender.com", when=t2))
+    mailbox.deliver(make_email("solo@other.com"))
+
+    msgs = client.get("/api/messages").get_json()
+    by_addr = {m["from_email_norm"]: m for m in msgs}
+    assert by_addr["repeat@sender.com"]["sender_msg_count"] == 2
+    assert by_addr["solo@other.com"]["sender_msg_count"] == 1
+
+
+def test_sender_collapse_rn_not_in_response(client, mailbox):
+    """Internal _rn column must not leak into the JSON response."""
+    t1 = T0 + timedelta(hours=1)
+    t2 = T0 + timedelta(hours=2)
+    mailbox.deliver(make_email("repeat@sender.com", when=t1))
+    mailbox.deliver(make_email("repeat@sender.com", when=t2))
+
+    msgs = client.get("/api/messages").get_json()
+    for m in msgs:
+        assert "_rn" not in m
+        assert "_sender_msg_count" not in m
+
+
+def test_sender_collapse_tier_filter(client, mailbox):
+    """Tier filtering still works correctly with per-sender collapse."""
+    mailbox.establish_contact("dana@acme.com")  # tier 3
+    mailbox.deliver(make_email("dana@acme.com"))  # same sender, still tier 3
+    mailbox.deliver(make_email("cold@stranger.net"))  # tier 0
+
+    # tier 0 should return only cold@stranger.net (one row)
+    msgs = client.get("/api/messages?tier=0").get_json()
+    addrs = {m["from_email_norm"] for m in msgs}
+    assert addrs == {"cold@stranger.net"}
+
+    # tier 3 should return only dana@acme.com (collapsed to one row)
+    msgs3 = client.get("/api/messages?tier=3").get_json()
+    addrs3 = {m["from_email_norm"] for m in msgs3}
+    assert addrs3 == {"dana@acme.com"}
+    assert msgs3[0]["sender_msg_count"] >= 2
+
+
+def test_sender_collapse_status_unique_incoming(client, mailbox):
+    """unique_incoming counts distinct senders, matching the collapsed list."""
+    t1 = T0 + timedelta(hours=1)
+    t2 = T0 + timedelta(hours=2)
+    mailbox.deliver(make_email("repeat@sender.com", when=t1))
+    mailbox.deliver(make_email("repeat@sender.com", when=t2))
+    mailbox.deliver(make_email("other@elsewhere.com"))
+
+    s = client.get("/api/status").get_json()
+    assert s["incoming"] == 3  # total messages
+    assert s["unique_incoming"] == 2  # distinct senders
+    assert s["senders"] == 2

@@ -356,10 +356,10 @@ async function loadAccounts() {
 async function loadStatus() {
   const s = await (await fetch(`/api/status?account=${currentAccount}`)).json();
   if (s.error) return;  // account not found — ignore silently
-  const dupes = s.incoming - (s.unique_incoming || s.incoming);
-  const dupeNote = dupes > 0 ? ` · ${dupes} dupes hidden` : "";
+  const hidden = s.incoming - (s.unique_incoming || s.incoming);
+  const hiddenNote = hidden > 0 ? ` · ${hidden} collapsed` : "";
   document.getElementById("stats").textContent =
-    `${s.unique_incoming || s.incoming} unique incoming · ${s.senders} senders${dupeNote}`;
+    `${s.senders} senders · ${s.incoming} messages${hiddenNote}`;
   const warnings = [];
   if (s.encryption !== "sqlcipher")
     warnings.push("⚠ database not encrypted (sqlcipher not installed)");
