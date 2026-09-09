@@ -32,6 +32,10 @@ def account_secret_name(account_id: int) -> str:
     return f"account/{account_id}"
 
 
+def _refresh_token_name(account_id: int) -> str:
+    return f"account/{account_id}/refresh"
+
+
 def get_account_secret(account_id: int) -> str | None:
     import keyring
 
@@ -42,3 +46,17 @@ def set_account_secret(account_id: int, secret: str) -> None:
     import keyring
 
     keyring.set_password(SERVICE, account_secret_name(account_id), secret)
+
+
+def get_refresh_token(account_id: int) -> str | None:
+    """Return the OAuth2 refresh token for *account_id*, or None."""
+    import keyring
+
+    return keyring.get_password(SERVICE, _refresh_token_name(account_id))
+
+
+def set_refresh_token(account_id: int, token: str) -> None:
+    """Store the OAuth2 refresh token for *account_id* in the OS keychain."""
+    import keyring
+
+    keyring.set_password(SERVICE, _refresh_token_name(account_id), token)

@@ -29,8 +29,9 @@ def _add_account(monkeypatch, email="jacob@example.com"):
     return main(["add-account", email, "--host", "imap.example.com"])
 
 
-def test_add_account_and_set_source(env, monkeypatch, capsys):
+def test_add_account_and_set_source(env, monkeypatch, capsys, store):  # noqa: F811
     assert _add_account(monkeypatch) == 0
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
     assert main(["set-source", "1", "mail-store"]) == 0
     assert "mail-store" in capsys.readouterr().out
 
@@ -209,3 +210,39 @@ def test_add_account_aborted_prompt_does_not_write_row(env, monkeypatch, capsys)
     from nodary.cli import _open
 
     assert _open().execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0
+
+
+def test_set_source_mail_store_fails_on_bad_layout(env, monkeypatch, capsys, tmp_path):
+    """set-source mail-store must validate the layout and refuse to switch
+    when the store cannot be found."""
+    assert _add_account(monkeypatch) == 0
+    bad = tmp_path / "no-mail-here"
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(bad))
+    assert main(["set-source", "1", "mail-store"]) == 1
+    err = capsys.readouterr().err
+    assert "does not exist" in err.lower()
+    # the account must NOT have been switched to mail_store
+    from nodary.cli import _open
+
+    method = (
+        _open().execute("SELECT auth_method FROM accounts WHERE id = 1").fetchone()[0]
+    )
+    assert method != "mail_store"
+
+
+def test_sync_fails_cleanly_on_missing_layout(env, monkeypatch, capsys, tmp_path):
+    """sync must exit non-zero with a clear error when the mail store layout
+    cannot be detected."""
+    assert _add_account(monkeypatch) == 0
+    # Pre-set the account to mail_store directly in the DB (bypassing CLI
+    # validation, simulating a stale config or missing store after OS upgrade).
+    from nodary.cli import _open
+
+    conn = _open()
+    conn.execute("UPDATE accounts SET auth_method = 'mail_store' WHERE id = 1")
+    conn.commit()
+    bad = tmp_path / "no-mail-here"
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(bad))
+    assert main(["sync"]) == 1
+    err = capsys.readouterr().err
+    assert "does not exist" in err.lower()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -225,3 +226,276 @@ def test_run_no_tls_skips_certificate_lookup(conn, monkeypatch):
     monkeypatch.setattr("flask.Flask.run", lambda self, **kw: captured(**kw))
     run(conn, tls=False)
     assert captured.kwargs["ssl_context"] is None
+
+
+# ── sync-health status fields ─────────────────────────────────────────
+
+
+def test_status_includes_accounts_and_skip_fields(client, conn):
+    r = client.get("/api/status").get_json()
+    assert "accounts" in r
+    assert "total_skipped" in r
+    assert "has_errors" in r
+    assert isinstance(r["accounts"], list)
+    assert r["total_skipped"] == 0
+    assert r["has_errors"] is False
+
+
+def test_status_accounts_per_account_shape(client, conn):
+    r = client.get("/api/status").get_json()
+    assert len(r["accounts"]) == 1  # conftest creates one account
+    a = r["accounts"][0]
+    assert {
+        "id",
+        "email",
+        "auth_method",
+        "last_error",
+        "last_synced_at",
+        "skip_count",
+    } <= set(a)
+    assert a["email"] == "jacob@myco.com"
+    assert a["last_synced_at"] is None  # no sync yet
+
+
+def test_status_skip_count_reflects_skipped_messages(client, conn):
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 100, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 101, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 102, 'unparseable_header', ?)",
+        (now,),
+    )
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["total_skipped"] == 3
+    assert r["accounts"][0]["skip_count"] == 3
+
+
+def test_status_last_error_surfaces(client, conn):
+    conn.execute(
+        "UPDATE accounts SET last_error = ? WHERE id = 1", ("missing credential",)
+    )
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["has_errors"] is True
+    assert r["accounts"][0]["last_error"] == "missing credential"
+
+
+def test_status_last_synced_at_derived_from_folders(client, conn):
+    ts = int(time.time()) - 3600
+    conn.execute("UPDATE folders SET last_synced_at = ? WHERE id = 1", (ts,))
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["accounts"][0]["last_synced_at"] == ts
+
+
+# ── skip list endpoint ───────────────────────────────────────────────
+
+
+def test_skipped_endpoint_returns_rows(client, conn):
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 200, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.commit()
+    rows = client.get("/api/skipped").get_json()
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["uid"] == 200
+    assert r["reason"] == "missing_emlx"
+    assert r["folder_name"] == "INBOX"
+    assert r["account_email"] == "jacob@myco.com"
+    # no message content in skip list
+    for key in ("body", "subject", "from_addr", "message_id"):
+        assert key not in r
+
+
+def test_skipped_endpoint_empty(client):
+    rows = client.get("/api/skipped").get_json()
+    assert rows == []
+
+
+# ── dashboard renders status strip ───────────────────────────────────
+
+
+def test_index_renders_status_strip(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="status-strip"' in html
+    assert "status-bar" in html
+    assert "status-dot" in html
+
+
+def test_index_renders_skip_overlay(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="skip-overlay"' in html
+    assert "/api/skipped" in html
+
+
+# ── account filter ────────────────────────────────────────────────────
+
+
+def _add_second_account(conn):
+    """Insert a second account + folder + identity, return (acct_id, folder_id)."""
+    conn.execute(
+        "INSERT INTO accounts (id, email, imap_host, auth_method, created_at)"
+        " VALUES (2, 'alice@other.com', 'imap.other', 'app_password', 0)"
+    )
+    conn.execute(
+        "INSERT INTO user_identities (account_id, email_norm) VALUES (2, 'alice@other.com')"
+    )
+    conn.execute(
+        "INSERT INTO folders (id, account_id, name, role) VALUES (3, 2, 'INBOX', 'inbox')"
+    )
+    conn.commit()
+    return 2, 3
+
+
+def _deliver_into_folder(conn, folder_id, uid, from_addr, direction="in"):
+    """Insert a minimal scored message directly into a folder (bypassing pipeline)."""
+    conn.execute(
+        "INSERT INTO senders (id, email_norm, domain, reg_domain,"
+        " reg_domain_skeleton, is_freemail, first_seen_at, last_seen_at)"
+        " VALUES ((SELECT COALESCE(MAX(id),0)+1 FROM senders), ?, 'x.com', 'x.com', 'x.com', 0, 0, 0)"
+        " ON CONFLICT(email_norm) DO NOTHING",
+        (from_addr,),
+    )
+    sender_id = conn.execute(
+        "SELECT id FROM senders WHERE email_norm = ?", (from_addr,)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO messages (folder_id, uid, message_id, direction, sender_id,"
+        " from_email_norm, sent_at, size_bytes)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, 100)",
+        (
+            folder_id,
+            uid,
+            f"<test{uid}@x>",
+            direction,
+            sender_id,
+            from_addr,
+            1700000000 + uid,
+        ),
+    )
+    msg_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO message_scores (message_id, engine_version,"
+        " trust_tier_at_scoring, baseline_n, anomaly_score, scored_at)"
+        " VALUES (?, '1.0.0', 0, 1, 50.0, 0)",
+        (msg_id,),
+    )
+    conn.commit()
+    return msg_id
+
+
+def test_messages_account_filter_returns_only_that_account(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))  # account 1, folder 1
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")  # account 2, folder 3
+
+    msgs_acct1 = client.get("/api/messages?account=1").get_json()
+    addrs1 = {m["from_email_norm"] for m in msgs_acct1}
+    assert "cold@stranger.net" in addrs1
+    assert "other@x.com" not in addrs1
+
+    msgs_acct2 = client.get("/api/messages?account=2").get_json()
+    addrs2 = {m["from_email_norm"] for m in msgs_acct2}
+    assert "other@x.com" in addrs2
+    assert "cold@stranger.net" not in addrs2
+
+
+def test_messages_account_all_returns_all_accounts(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")
+
+    msgs = client.get("/api/messages?account=all").get_json()
+    addrs = {m["from_email_norm"] for m in msgs}
+    assert "cold@stranger.net" in addrs
+    assert "other@x.com" in addrs
+
+
+def test_messages_account_filter_composes_with_tier(client, conn, mailbox):
+    mailbox.establish_contact("dana@acme.com")  # tier 3, account 1
+    mailbox.deliver(make_email("cold@stranger.net"))  # tier 0, account 1
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")  # tier 0, account 2
+
+    # tier 0 + account 1: only cold@stranger.net
+    msgs = client.get("/api/messages?account=1&tier=0").get_json()
+    addrs = {m["from_email_norm"] for m in msgs}
+    assert addrs == {"cold@stranger.net"}
+
+    # tier 0 + account 2: only other@x.com
+    msgs2 = client.get("/api/messages?account=2&tier=0").get_json()
+    addrs2 = {m["from_email_norm"] for m in msgs2}
+    assert addrs2 == {"other@x.com"}
+
+
+def test_messages_account_not_found(client, conn):
+    r = client.get("/api/messages?account=999")
+    assert r.status_code == 404
+    assert "error" in r.get_json()
+
+
+def test_messages_account_invalid_id(client, conn):
+    r = client.get("/api/messages?account=abc")
+    assert r.status_code == 404
+
+
+def test_status_account_filter_returns_only_that_account(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))  # account 1
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")  # account 2
+
+    s1 = client.get("/api/status?account=1").get_json()
+    assert len(s1["accounts"]) == 1
+    assert s1["accounts"][0]["email"] == "jacob@myco.com"
+    assert s1["incoming"] == 1
+
+    s2 = client.get("/api/status?account=2").get_json()
+    assert len(s2["accounts"]) == 1
+    assert s2["accounts"][0]["email"] == "alice@other.com"
+    assert s2["incoming"] == 1
+
+
+def test_status_account_all_returns_all_accounts(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")
+
+    s = client.get("/api/status?account=all").get_json()
+    emails = {a["email"] for a in s["accounts"]}
+    assert emails == {"jacob@myco.com", "alice@other.com"}
+    assert s["incoming"] == 2
+
+
+def test_status_account_not_found(client, conn):
+    r = client.get("/api/status?account=999")
+    assert r.status_code == 404
+    assert "error" in r.get_json()
+
+
+def test_accounts_endpoint_lists_all(client, conn):
+    _add_second_account(conn)
+    accts = client.get("/api/accounts").get_json()
+    emails = {a["email"] for a in accts}
+    assert emails == {"jacob@myco.com", "alice@other.com"}
+    assert all("id" in a for a in accts)
+
+
+def test_index_renders_account_switcher(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="acct-switcher"' in html
+    assert 'id="acct-select"' in html
+    assert "/api/accounts" in html

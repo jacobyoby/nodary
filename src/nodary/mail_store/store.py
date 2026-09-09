@@ -28,12 +28,178 @@ from pathlib import Path
 SENT_NAMES = ("Sent Messages", "[Gmail]/Sent Mail", "Sent Items", "Sent")
 INBOX_NAMES = ("[Gmail]/All Mail", "INBOX")
 
+# Layout versions we have verified against. Expand as newer layouts are
+# tested and confirmed compatible.
+SUPPORTED_LAYOUTS = {"V10"}
+
+# Known Apple Mail layout directories, ordered newest first so the detector
+# prefers the most recent compatible version when multiple exist.
+KNOWN_ROOTS = ["V10", "V9", "V8", "V7", "V6"]
+
+
+class MailStoreError(OSError):
+    """Base error for mail-store problems."""
+
+
+class MailStoreLayoutError(MailStoreError):
+    """Raised when the Apple Mail store layout is missing or unsupported.
+
+    Attributes:
+        path: the directory that was probed (if any).
+        found_version: the layout version directory found (e.g. "V11"), or
+            None when no Mail directory exists at all.
+        supported: the set of layout versions this build understands.
+    """
+
+    def __init__(
+        self,
+        path: Path | None,
+        found_version: str | None,
+        supported: frozenset[str],
+        message: str,
+    ):
+        super().__init__(message)
+        self.path = path
+        self.found_version = found_version
+        self.supported = supported
+
+
+def detect_mail_store_root(configured_path: str | None = None) -> Path:
+    """Detect and validate the Apple Mail store root.
+
+    If *configured_path* is set (via ``NODARY_MAIL_STORE`` or CLI), validate
+    it directly — it must exist and contain a known layout directory or
+    itself be a layout directory with an Envelope Index.
+
+    Otherwise, probe ``~/Library/Mail/`` for directories matching known
+    layouts (V10, V9, …).  Prefer the newest supported layout when
+    multiple exist.
+
+    Raises :class:`MailStoreLayoutError` with an actionable message when
+    the store cannot be found or the only layout present is unsupported.
+    """
+    if configured_path:
+        return _validate_explicit_path(configured_path)
+    return _probe_default()
+
+
+def _validate_explicit_path(configured_path: str) -> Path:
+    """Validate an explicitly configured mail-store path."""
+    p = Path(configured_path)
+
+    # The user may point directly at a layout dir (e.g. …/V10) or at the
+    # parent Mail directory containing one.
+    if _has_envelope_index(p):
+        return p
+
+    # Maybe they pointed at the parent (~/Library/Mail)?
+    if p.is_dir():
+        found = _find_layout_in(p)
+        if found is not None:
+            return found
+
+    if not p.exists():
+        raise MailStoreLayoutError(
+            path=p,
+            found_version=None,
+            supported=frozenset(SUPPORTED_LAYOUTS),
+            message=(
+                f"configured mail-store path does not exist: {p}\n"
+                "set NODARY_MAIL_STORE to a directory containing a supported"
+                f" layout ({', '.join(sorted(SUPPORTED_LAYOUTS))})."
+            ),
+        )
+    raise MailStoreLayoutError(
+        path=p,
+        found_version=None,
+        supported=frozenset(SUPPORTED_LAYOUTS),
+        message=(
+            f"configured mail-store path has no recognised layout: {p}\n"
+            "expected a subdirectory named"
+            f" {', '.join(KNOWN_ROOTS)} or a layout directory containing"
+            " MailData/Envelope Index.\n"
+            "set NODARY_MAIL_STORE to a directory containing a supported"
+            f" layout ({', '.join(sorted(SUPPORTED_LAYOUTS))})."
+        ),
+    )
+
+
+def _probe_default() -> Path:
+    """Probe ~/Library/Mail/ for a known layout directory."""
+    mail_dir = Path.home() / "Library" / "Mail"
+    if not mail_dir.is_dir():
+        raise MailStoreLayoutError(
+            path=mail_dir,
+            found_version=None,
+            supported=frozenset(SUPPORTED_LAYOUTS),
+            message=(
+                f"Apple Mail directory not found: {mail_dir}\n"
+                "nodary reads from the local Apple Mail store. Ensure Apple "
+                "Mail is set up on this machine and Full Disk Access is "
+                "granted to the terminal.\n"
+                "if your Mail store lives elsewhere, set NODARY_MAIL_STORE "
+                "to the layout directory"
+                f" (e.g. ~/Library/Mail/{', '.join(sorted(SUPPORTED_LAYOUTS))})."
+            ),
+        )
+
+    found = _find_layout_in(mail_dir)
+    if found is not None:
+        return found
+
+    # No known layout directory — check for unknown ones to give a better
+    # error message.
+    unknown = sorted(
+        d.name
+        for d in mail_dir.iterdir()
+        if d.is_dir() and d.name.startswith("V") and d.name[1:].isdigit()
+    )
+    if unknown:
+        newest = unknown[-1]  # sorted alphabetically, V11 > V10
+        raise MailStoreLayoutError(
+            path=mail_dir,
+            found_version=newest,
+            supported=frozenset(SUPPORTED_LAYOUTS),
+            message=(
+                f"unsupported Apple Mail layout: {newest} "
+                f"(found in {mail_dir})\n"
+                f"nodary supports: {', '.join(sorted(SUPPORTED_LAYOUTS))}.\n"
+                f"if you believe {newest} is compatible, set "
+                f"NODARY_MAIL_STORE to the layout directory and file an "
+                f"issue so it can be verified."
+            ),
+        )
+    raise MailStoreLayoutError(
+        path=mail_dir,
+        found_version=None,
+        supported=frozenset(SUPPORTED_LAYOUTS),
+        message=(
+            f"no recognised Apple Mail layout in {mail_dir}\n"
+            f"expected one of: {', '.join(KNOWN_ROOTS)}.\n"
+            "if your Mail store uses a different layout, set "
+            "NODARY_MAIL_STORE to the layout directory"
+            f" (e.g. ~/Library/Mail/{', '.join(sorted(SUPPORTED_LAYOUTS))})."
+        ),
+    )
+
+
+def _find_layout_in(parent: Path) -> Path | None:
+    """Return the newest supported layout directory inside *parent*."""
+    for name in KNOWN_ROOTS:
+        candidate = parent / name
+        if candidate.is_dir() and name in SUPPORTED_LAYOUTS:
+            return candidate
+    return None
+
+
+def _has_envelope_index(p: Path) -> bool:
+    return p.is_dir() and (p / "MailData" / "Envelope Index").is_file()
+
 
 def default_root() -> Path:
+    """Resolve the mail-store root, using NODARY_MAIL_STORE if set."""
     env = os.environ.get("NODARY_MAIL_STORE")
-    if env:
-        return Path(env)
-    return Path.home() / "Library" / "Mail" / "V10"
+    return detect_mail_store_root(configured_path=env)
 
 
 class MailStore:
@@ -49,7 +215,8 @@ class MailStore:
             if not db.is_file():
                 raise FileNotFoundError(
                     f"{db}: Mail store index not found (is Full Disk Access "
-                    "granted, and does this macOS use the V10 layout?)"
+                    f"granted, and does this macOS use a supported layout? "
+                    f"supported: {', '.join(sorted(SUPPORTED_LAYOUTS))})"
                 )
             uri = f"file:{urllib.parse.quote(str(db))}?mode=ro"
             self._conn = sqlite3.connect(uri, uri=True)

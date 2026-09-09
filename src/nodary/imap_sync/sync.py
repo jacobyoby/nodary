@@ -38,6 +38,47 @@ class SyncStats:
     new_messages: int = 0
     invalidated_folders: list[str] = field(default_factory=list)
     initial_backfill: bool = False
+    server_deleted: int = 0
+
+
+def reconcile_deleted_uids(
+    conn: sqlite3.Connection,
+    account_id: int,
+    folder_id: int,
+    server_uids: set[int],
+) -> int:
+    """Mark locally-retained messages that no longer exist on the server.
+
+    Rows are never removed — the ``deleted_upstream`` flag is informational
+    only, distinguishing "never fetched" from "deleted upstream" while
+    preserving all facts for behavioral baselines.
+    """
+    local_uids = set(
+        row[0]
+        for row in conn.execute(
+            "SELECT uid FROM messages WHERE folder_id=?",
+            (folder_id,),
+        )
+    )
+    vanished = local_uids - server_uids
+    if vanished:
+        placeholders = ",".join("?" * len(vanished))
+        conn.execute(
+            f"UPDATE messages SET deleted_upstream=1"
+            f" WHERE folder_id=? AND uid IN ({placeholders})",
+            [folder_id] + list(vanished),
+        )
+    # Un-mark any that reappeared (re-fetched after being deleted).
+    reappeared = local_uids & server_uids
+    if reappeared:
+        placeholders = ",".join("?" * len(reappeared))
+        conn.execute(
+            f"UPDATE messages SET deleted_upstream=0"
+            f" WHERE folder_id=? AND uid IN ({placeholders})"
+            f" AND deleted_upstream=1",
+            [folder_id] + list(reappeared),
+        )
+    return len(vanished)
 
 
 def _decode_part(data: bytes, encoding: str) -> bytes | None:
@@ -207,7 +248,16 @@ def sync_folder(
             )
             conn.commit()
         if missing:
-            return  # gap: everything from min(missing) on retries next sync
+            break  # gap: everything from min(missing) on retries next sync
+
+    # Reconcile: mark locally-retained messages that vanished from the server.
+    # new_uids(0) returns all server UIDs (UID > 0), cheap for both IMAP
+    # (one SEARCH) and the mail store (one SQL query).
+    all_server_uids = set(transport.new_uids(0))
+    n_deleted = reconcile_deleted_uids(conn, account_id, folder_id, all_server_uids)
+    if n_deleted:
+        conn.commit()
+    stats.server_deleted += n_deleted
 
 
 def sync_account(

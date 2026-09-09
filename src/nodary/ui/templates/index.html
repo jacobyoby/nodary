@@ -39,6 +39,15 @@
   header .stat { color: var(--dim); font-size: 13px; margin-left: auto; }
   #warn { flex-basis: 100%; color: var(--hot); font-size: 13px; }
 
+  /* account switcher */
+  .acct-switcher { max-width: 980px; margin: 0 auto; padding: 0 24px 8px;
+                    display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .acct-switcher label { color: var(--dim); }
+  .acct-switcher select { background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+    font: inherit; font-size: 13px; cursor: pointer; box-shadow: var(--shadow); }
+  .acct-switcher select:focus { border-color: var(--t3); outline: none; }
+
   .filters { display: flex; gap: 6px; flex-wrap: wrap; max-width: 980px;
              margin: 0 auto; padding: 0 24px 14px; }
   .filters button { background: var(--panel); color: var(--dim);
@@ -150,6 +159,49 @@
   .recent .top { display: flex; gap: 10px; align-items: baseline; }
   .recent .score { font-weight: 700; }
   .muted { color: var(--faint); font-size: 13px; }
+
+  /* sync-health status strip */
+  .status-strip { max-width: 980px; margin: 0 auto; padding: 0 24px 10px; }
+  .status-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                background: var(--panel); border: 1px solid var(--line);
+                border-radius: 10px; padding: 10px 16px; font-size: 13px;
+                box-shadow: var(--shadow); }
+  .status-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+  .status-dot.green  { background: #2c7a55; }
+  .status-dot.yellow { background: #b08a20; }
+  .status-dot.red    { background: #c0392b; }
+  .status-text { flex: 1; color: var(--dim); min-width: 0; }
+  .status-text b { color: var(--text); font-weight: 600; }
+  .status-link { color: var(--t3); text-decoration: none; cursor: pointer;
+                 border-bottom: 1px dotted var(--t3); white-space: nowrap; }
+  .status-link:hover { border-bottom-style: solid; }
+  .acct-pill { display: inline-block; font-size: 12px; color: var(--dim);
+               background: color-mix(in srgb, var(--panel) 85%, var(--line));
+               border: 1px solid var(--line); border-radius: 999px;
+               padding: 2px 10px; margin: 2px 0; white-space: nowrap; }
+  .acct-pill .acct-err { color: var(--hot); }
+
+  /* skip list overlay */
+  .skip-overlay { display: none; position: fixed; inset: 0; z-index: 100;
+                  background: rgba(0,0,0,.35); align-items: flex-start;
+                  justify-content: center; padding: 48px 16px; }
+  .skip-overlay.open { display: flex; }
+  .skip-panel { background: var(--panel); border: 1px solid var(--line);
+                border-radius: 12px; max-width: 720px; width: 100%;
+                max-height: 70vh; overflow: auto; padding: 20px 24px;
+                box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+  .skip-panel h2 { font-size: 16px; margin: 0 0 14px; display: flex;
+                   align-items: center; justify-content: space-between; }
+  .skip-panel h2 button { background: none; border: none; color: var(--dim);
+                          font-size: 20px; cursor: pointer; padding: 0 4px; }
+  .skip-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .skip-table th { text-align: left; color: var(--faint); font-weight: 550;
+                   padding: 4px 8px 8px; border-bottom: 1px solid var(--line); }
+  .skip-table td { padding: 6px 8px; border-bottom: 1px solid var(--line);
+                   color: var(--dim); vertical-align: top; }
+  .skip-table td.num { font-family: ui-monospace, Menlo, monospace;
+                        font-variant-numeric: tabular-nums; }
+  .skip-empty { color: var(--dim); padding: 24px 0; text-align: center; }
 </style>
 </head>
 <body>
@@ -159,6 +211,11 @@
   <span class="stat num" id="stats">loading…</span>
   <span id="warn"></span>
 </header>
+<div class="acct-switcher" id="acct-switcher">
+  <label for="acct-select">Account:</label>
+  <select id="acct-select"><option value="all" selected>all accounts</option></select>
+</div>
+<div class="status-strip" id="status-strip"></div>
 <div class="filters" id="filters">
   <button data-tier="" class="on">all</button>
   <button data-tier="3">tier 3 · established</button>
@@ -266,17 +323,99 @@ function scoreRing(score) {
     `</svg><span class="val num">${score.toFixed(0)}</span></span>`;
 }
 
+function fmtSyncTime(ts) {
+  if (!ts) return "never";
+  const d = new Date(ts * 1000), now = new Date();
+  const diff = (now - d) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+  return Math.floor(diff / 86400) + "d ago";
+}
+
+// --- account switcher ---
+let currentAccount = "all";
+
+async function loadAccounts() {
+  const accts = await (await fetch("/api/accounts")).json();
+  const sel = document.getElementById("acct-select");
+  // keep "all" as first option, add per-account options
+  accts.forEach(a => {
+    const opt = document.createElement("option");
+    opt.value = a.id;
+    opt.textContent = a.email;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener("change", () => {
+    currentAccount = sel.value;
+    loadStatus();
+    loadMessages(tier);
+  });
+}
+
 async function loadStatus() {
-  const s = await (await fetch("/api/status")).json();
+  const s = await (await fetch(`/api/status?account=${currentAccount}`)).json();
+  if (s.error) return;  // account not found — ignore silently
+  const dupes = s.incoming - (s.unique_incoming || s.incoming);
+  const dupeNote = dupes > 0 ? ` · ${dupes} dupes hidden` : "";
   document.getElementById("stats").textContent =
-    `${s.incoming} incoming · ${s.senders} senders · ${s.messages} messages`;
+    `${s.unique_incoming || s.incoming} unique incoming · ${s.senders} senders${dupeNote}`;
+  const warnings = [];
   if (s.encryption !== "sqlcipher")
-    document.getElementById("warn").textContent = "⚠ database not encrypted (sqlcipher not installed)";
+    warnings.push("⚠ database not encrypted (sqlcipher not installed)");
+  if (s.psl_drift)
+    warnings.push("⚠ Public Suffix List has changed since profiles were built. Scores may differ. Run nodary rebuild to update.");
+  document.getElementById("warn").textContent = warnings.join(" · ");
+
+  // build status strip
+  const strip = document.getElementById("status-strip");
+  const accts = s.accounts || [];
+  const hasErrors = s.has_errors;
+  const skipped = s.total_skipped || 0;
+  const serverDel = s.server_deleted_count || 0;
+  const health = hasErrors ? "red" : (skipped > 0 ? "yellow" : "green");
+
+  let summary = "";
+  if (skipped > 0) {
+    const skipParts = accts.filter(a => a.skip_count > 0)
+      .map(a => `${a.skip_count} in ${esc(a.email)}`);
+    summary += `<b>${skipped} permanently skipped</b> (${skipParts.join(", ")})`;
+  }
+  if (serverDel > 0) {
+    if (summary) summary += " · ";
+    const delFolders = (s.server_deleted_by_folder || [])
+      .map(d => `${d.count} in ${esc(d.folder)}`).join(", ");
+    summary += `<b>${serverDel} server-deleted</b> (retained: ${delFolders})`;
+  }
+  const errAccts = accts.filter(a => a.last_error);
+  if (errAccts.length) {
+    if (summary) summary += " · ";
+    summary += errAccts.map(a =>
+      `<b class="acct-err">${esc(a.email)}: ${esc(a.last_error)}</b>`
+    ).join(", ");
+  }
+  if (!summary) summary = "<b>sync healthy</b>";
+
+  const acctPills = accts.map(a => {
+    const synced = fmtSyncTime(a.last_synced_at);
+    const msgs = a.skip_count !== undefined ? ` · ${a.skip_count} skip` : "";
+    const err = a.last_error ? ` <span class="acct-err">· ${esc(a.last_error)}</span>` : "";
+    return `<span class="acct-pill">${esc(a.email)} · ${synced}${msgs}${err}</span>`;
+  }).join(" ");
+
+  const skipLink = skipped > 0
+    ? ` <a class="status-link" onclick="openSkipList()">view skip list</a>` : "";
+
+  strip.innerHTML = `<div class="status-bar">` +
+    `<span class="status-dot ${health}"></span>` +
+    `<span class="status-text">${summary}${skipLink}</span>` +
+    `${acctPills}</div>`;
 }
 
 async function loadMessages(tier) {
   const q = tier === "" ? "" : `&tier=${tier}`;
-  const msgs = await (await fetch(`/api/messages?limit=300${q}`)).json();
+  const aq = currentAccount === "all" ? "" : `&account=${currentAccount}`;
+  const msgs = await (await fetch(`/api/messages?limit=300${q}${aq}`)).json();
   const list = document.getElementById("list");
   if (!msgs.length) { list.innerHTML = '<div class="empty">no scored messages — run <code>nodary sync</code></div>'; return; }
   list.innerHTML = msgs.map(m => {
@@ -308,7 +447,8 @@ async function loadMessages(tier) {
       `<span class="tier t${m.tier}" title="${esc(m.tier_label)}">T${m.tier} ${TIER_SHORT[m.tier]}</span>` +
       `<span class="meta num">${m.n_attachments ? "📎" + m.n_attachments + " " : ""}` +
       `${m.n_links ? "🔗" + m.n_links + " " : ""}` +
-      `<span class="when">${fmtDate(m.sent_at)}</span></span>` +
+      `<span class="when">${fmtDate(m.sent_at)}</span>` +
+      `${m.sender_msg_count > 1 ? " · " + m.sender_msg_count + " msgs" : ""}</span>` +
       `</div><div class="flags">${flags}${baseline}${open}</div></div>`;
   }).join("");
 }
@@ -407,6 +547,36 @@ function route() {
   else showList();
 }
 
+async function openSkipList() {
+  const overlay = document.getElementById("skip-overlay");
+  overlay.classList.add("open");
+  const body = document.getElementById("skip-body");
+  body.innerHTML = '<div class="skip-empty">loading…</div>';
+  try {
+    const rows = await (await fetch("/api/skipped")).json();
+    if (!rows.length) {
+      body.innerHTML = '<div class="skip-empty">no skipped messages</div>';
+      return;
+    }
+    body.innerHTML = `<table class="skip-table"><thead><tr>` +
+      `<th>Account</th><th>Folder</th><th>UID</th><th>Reason</th><th>Skipped</th>` +
+      `</tr></thead><tbody>` +
+      rows.map(r => `<tr>` +
+        `<td>${esc(r.account_email)}</td>` +
+        `<td>${esc(r.folder_name)}</td>` +
+        `<td class="num">${r.uid}</td>` +
+        `<td>${esc(r.reason)}</td>` +
+        `<td class="num">${fmtDate(r.skipped_at)}</td>` +
+        `</tr>`).join("") +
+      `</tbody></table>`;
+  } catch (e) {
+    body.innerHTML = '<div class="skip-empty">failed to load skip list</div>';
+  }
+}
+function closeSkipList() {
+  document.getElementById("skip-overlay").classList.remove("open");
+}
+
 let tier = "";
 document.getElementById("filters").addEventListener("click", e => {
   if (e.target.tagName !== "BUTTON") return;
@@ -421,8 +591,15 @@ document.addEventListener("keydown", e => {
 });
 window.addEventListener("hashchange", route);
 window.addEventListener("popstate", route);
+loadAccounts();
 loadStatus();
 loadMessages("").then(route);
 </script>
+<div class="skip-overlay" id="skip-overlay" onclick="if(event.target===this)closeSkipList()">
+  <div class="skip-panel">
+    <h2>Permanently Skipped Messages <button onclick="closeSkipList()" aria-label="close">×</button></h2>
+    <div id="skip-body"></div>
+  </div>
+</div>
 </body>
 </html>

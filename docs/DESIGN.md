@@ -33,8 +33,45 @@ cloud scoring APIs, or emit telemetry.
 - With the `sqlcipher` extra installed, storage uses SQLCipher; otherwise it
   falls back to plain SQLite and records `schema_meta.encryption = none`.
 - Public Suffix List lookup uses `tldextract`'s bundled snapshot with runtime
-  fetching disabled. The freemail list and confusables subset are vendored in
-  `feature_extraction.normalize`.
+  fetching disabled. The freemail list is vendored in `feature_extraction.normalize`;
+  the confusables map is generated at build time from vendored UTS #39 data
+  (`data/uts39/confusables.txt`) — no Unicode downloads at runtime.
+
+## Dashboard Sync-Health UI
+
+The dashboard shows a sync-health status strip between the header and tier
+filters. The strip contains a color-coded dot (green = healthy, yellow =
+skipped messages exist, red = per-account errors), a plain-language summary
+of permanent skip counts and per-account errors, and per-account pills
+showing last sync time.
+
+Skip counts come from the `skipped_messages` table, which records folder,
+UID, reason, and timestamp for messages the sync layer could not ingest
+(e.g. missing `.emlx`, unparseable headers). No message content is stored.
+Last sync time is derived from `folders.last_synced_at` (MAX per account).
+Last error is a persisted string on `accounts.last_error`, written by the
+sync layer when an account-level failure occurs (e.g. missing credential).
+
+The skip count links to a local-only overlay listing skipped messages via
+`/api/skipped`. The overlay shows account, folder name, UID, reason, and
+timestamp — no message bodies, subjects, or sender addresses.
+
+## Dashboard Account Filtering
+
+The dashboard supports viewing data for a single account or all accounts
+(default). An account switcher dropdown is populated from `/api/accounts`
+(id + email for every configured account, plus an "all accounts" option).
+Switching accounts updates the message list and status strip without a
+page reload.
+
+`/api/messages` and `/api/status` accept `?account=<id>` or `?account=all`
+(default). When filtered to a single account, the endpoints join through
+`folders.account_id` to restrict results. The account filter composes with
+existing tier and limit parameters. A nonexistent account id returns 404.
+
+When viewing all accounts, the status strip shows per-account pills with
+last sync time and skip count. When viewing a single account, only that
+account's pill is shown and all counts reflect only that account's data.
 
 ## Main Components
 
@@ -46,6 +83,34 @@ cloud scoring APIs, or emit telemetry.
 - `mail_store.MailStoreTransport` is the local Apple Mail source. It opens the
   Envelope Index read-only, resolves `.emlx`/`.partial.emlx` files, and exposes
   the same transport protocol as IMAP.
+
+## Mail-Store Layout Detection
+
+Apple Mail's on-disk store lives under `~/Library/Mail/` and uses versioned
+layout directories (V6, V7, V8, V9, V10, …). The internal file layout —
+Envelope Index path, reversed-digit bucketing for `.emlx` files, mbox
+naming — can change between versions.
+
+`detect_mail_store_root()` validates the store before any data is read. It
+runs at two points:
+
+1. **`set-source mail-store`** — before clearing existing synced facts.
+   If detection fails, the account is not switched and no data is lost.
+2. **`sync`** — before constructing `MailStore`. If detection fails, sync
+   exits non-zero with a clear error and no partial writes.
+
+The detector prefers the newest supported layout when multiple version
+directories exist. `SUPPORTED_LAYOUTS` (currently `{"V10"}`) is the set of
+layouts verified against the current code. `KNOWN_ROOTS` lists all
+directory names the detector recognises, ordered newest-first. When an
+unsupported layout is found (e.g. V11 exists but V10 does not), the error
+names the found version, lists supported versions, and explains how to set
+`NODARY_MAIL_STORE` to override detection.
+
+`MailStoreLayoutError` carries the probed path, the found version string
+(or `None`), and the supported set, so programmatic callers can
+differentiate "no Mail at all" from "Mail exists but wrong version".
+
 - `imap_sync.sync` owns folder selection, UIDVALIDITY/high-water-mark sync,
   bounded text-part fetch, direction detection, and handoff to the pipeline.
 - `feature_extraction.extract` converts headers plus structure/text snippets
@@ -84,6 +149,11 @@ cloud scoring APIs, or emit telemetry.
 7. A self-From message is outgoing only when it is in a sent folder or it is
    self-sent without a DMARC failure. A self-From message with DMARC fail is
    treated as incoming and scored.
+8. After each folder sync, reconciliation compares local UIDs against the
+   server's full UID set. Any local UID absent from the server is marked
+   `deleted_upstream = 1`; any previously marked UID that reappears is
+   un-marked. No rows are deleted or purged — the mark is informational and
+   does not exclude facts from scoring baselines.
 
 ## Storage Model
 
@@ -94,14 +164,47 @@ cloud scoring APIs, or emit telemetry.
   `accounts.auth_method` allows `oauth2`, `app_password`, and `mail_store`.
 - Facts: `senders`, `threads`, `messages`, `message_attachments`,
   `message_link_domains`, and outgoing-only `message_recipients`.
+  `messages.deleted_upstream` is a mark-only flag (never purge): when a
+  message disappears from the server, the row is retained for behavioral
+  baselines but flagged so the UI can distinguish "never fetched" from
+  "deleted upstream".
 - Derived profiles: `sender_profiles`, `sender_display_names`,
   `sender_attachment_types`, `sender_link_domains`, `sender_replyto_addrs`,
   `thread_reply_credits`, and `domain_profiles`.
 - Scores: `message_scores` and `message_score_features`.
+- Sync health: `skipped_messages` (permanently skipped messages with
+  folder, UID, and reason; no message content).
 
 Derived tables are caches over message facts. `pipeline.rebuild()` deletes the
 derived tables and replays all messages ordered by `(sent_at, id)` so profiles,
 tiers, and scores are regenerated deterministically.
+
+## Schema Migrations
+
+`schema.sql` is the authoritative base schema; `CREATE TABLE IF NOT EXISTS`
+ensures it is safe to re-run. Databases created by older versions may lack
+columns, indexes, or constraint changes that cannot be expressed by
+`IF NOT EXISTS` alone. These changes are applied by versioned migrations
+in `src/nodary/storage/migrations/`.
+
+`schema_meta.schema_version` tracks the highest migration applied. The
+migration runner (`run_migrations`) applies pending migrations in version
+order, each inside an explicit transaction. On failure the transaction is
+rolled back, the `PRAGMA foreign_keys` state is restored, and a clear
+error is raised — no partial state is left behind.
+
+### Adding a migration
+
+1. Create `src/nodary/storage/migrations/_NNN_short_name.py`.
+2. Decorate its `apply(conn)` function with
+   `@register_migration(version=NNN, name="short_name")`.
+3. Make `apply` **idempotent** — check whether the change already exists
+   before applying it (e.g. `CREATE INDEX IF NOT EXISTS`, or inspect
+   `PRAGMA table_info` before `ALTER TABLE`).
+4. Import the module in `src/nodary/storage/migrations/__init__.py`.
+5. Bump `LATEST_VERSION` in `__init__.py` to match `NNN`.
+6. Bump `SCHEMA_VERSION` in `db.py` to the same value.
+7. Add tests covering the migration and any rollback behaviour.
 
 ## Normalization
 
@@ -109,8 +212,14 @@ tiers, and scores are regenerated deterministically.
   dots are removed.
 - Registrable domains come from the bundled `tldextract` Public Suffix List
   snapshot.
-- Display names and registrable domains are casefolded through a small
-  vendored UTS #39-style confusables table, plus common digit substitutions.
+- Display names and registrable domains are casefolded through a confusables
+  map generated from vendored UTS #39 data (`data/uts39/confusables.txt`,
+  Unicode 17.0.0) by `scripts/generate_confusables.py`, plus a hand-audited
+  curated subset (digit substitutions and Latin-target Cyrillic/Greek
+  mappings) that overrides the generated entries where they differ. The
+  curated subset is also the fallback when the generated module is absent.
+  To regenerate after updating the vendored data:
+  `python scripts/generate_confusables.py`.
 - Sender-local hour/day come from the UTC offset carried in the `Date` header,
   so behavioral baselines follow the sender's clock rather than the user's.
 - Authentication verdicts are parsed from the receiving server's

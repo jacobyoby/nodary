@@ -9,6 +9,74 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **OAuth2 refresh-token auto-renewal:** access tokens stored in the OS
+  keychain are now refreshed automatically when they expire. Refresh tokens
+  are stored in the OS keychain only (never in SQLite). On IMAP auth failure
+  (at login or mid-session), nodary detects the provider from the IMAP host,
+  POSTs to the provider's token endpoint with the stored refresh token,
+  updates the access token atomically in the keychain, and retries the IMAP
+  connection. Supported providers: Gmail (`imap.gmail.com`) and Microsoft 365
+  (`outlook.office365.com`). Client credentials are configured via
+  environment variables (`NODARY_GMAIL_CLIENT_ID`,
+  `NODARY_GMAIL_CLIENT_SECRET`, `NODARY_M365_CLIENT_ID`,
+  `NODARY_M365_CLIENT_SECRET`). Token endpoints are the ONLY non-IMAP
+  outbound traffic. CLI: `add-account --auth oauth2` prompts for an optional
+  refresh token; `set-secret --refresh-token` updates it. If no refresh
+  token is stored, the existing failure behavior is preserved. Per-account
+  auth failures are recorded in `accounts.last_error` and do not block
+  other accounts.
+- **Server-deleted UID reconciliation:** after each folder sync, nodary
+  compares local UIDs against the server's full UID set. Messages that
+  disappeared from the server are marked `deleted_upstream = 1` but never
+  purged — retained facts continue to contribute to behavioral baselines.
+  A previously marked UID that reappears is un-marked automatically.
+  `nodary status` reports per-folder server-deleted counts; the dashboard
+  shows the total in the sync-health status strip; `/api/status` exposes
+  `server_deleted_count` and `server_deleted_by_folder`. Migration 005
+  adds the `deleted_upstream` column.
+- **PSL snapshot version tracking:** the bundled Public Suffix List identity
+  (`tldextract` version + SHA-256 of the snapshot) is recorded in
+  `schema_meta` on first connect (migration 004). `connect()` detects drift
+  between the stored PSL version (from when profiles were last built) and
+  the current bundled snapshot. `nodary status` prints both versions and a
+  warning when they differ; the dashboard shows a banner advising
+  `nodary rebuild`. `rebuild` updates the stored version to clear drift.
+  No outbound fetches — the identity is derived entirely from local data.
+- **Mail-store layout detection:** nodary now probes `~/Library/Mail/` for
+  known Apple Mail layout directories (V10, V9, V8, V7, V6) and validates
+  the store before syncing or switching sources. Only V10 is verified
+  (`SUPPORTED_LAYOUTS`); if an unsupported layout (e.g. V11) is found,
+  nodary exits with a clear error naming the found version, listing
+  supported versions, and explaining how to set `NODARY_MAIL_STORE`. The
+  detection runs at `set-source mail-store` (before clearing facts) and at
+  sync start. `MailStoreLayoutError` carries the probed path, found
+  version, and supported list for programmatic consumers. Replaces the
+  previous hardcoded `~/Library/Mail/V10` fallback.
+- **Expanded confusables coverage:** lookalike-domain detection now uses a
+  confusables map generated from vendored Unicode UTS #39 data (Unicode
+  17.0.0, ~6 300 mappings) instead of the original ~40-entry curated
+  subset. The curated subset is retained as overrides (digit substitutions
+  3→e, 5→s, and Latin-target Cyrillic/Greek mappings that UTS #39
+  expresses differently) and as a fallback if the generated module is
+  missing. Build-time generation script: `scripts/generate_confusables.py`.
+  No network access at runtime. Engine version bumped to 1.1.0 (existing
+  stored scores are flagged as stale and recomputed on next rebuild).
+- **Dashboard account filter:** account switcher dropdown on the dashboard
+  lets you view messages and status for a single account or all accounts
+  (default). `/api/messages` and `/api/status` accept `?account=<id>` or
+  `?account=all` (default). The filter composes with existing tier and
+  limit parameters. New `/api/accounts` endpoint lists configured accounts
+  for the switcher. Per-account message counts and last-sync times are
+  shown in the status strip when viewing all accounts.
+- **Machine migration:** `export-profile` and `import-profile` CLI commands
+  for explicit, one-time transfer of the profile database between machines.
+  Export writes a `.tar.gz` archive containing the database and a
+  `manifest.json` (schema version, encryption mode, engine version, user
+  identities, export timestamp, SHA-256 hash). Import validates the manifest
+  and hash before restoring, refuses to overwrite without `--force`, and
+  produces clear errors on encryption mode mismatches. The archive is as
+  sensitive as the live database — IMAP secrets are never included and must
+  be re-entered on the target machine via `nodary set-secret`.
 - README donate Payment Link for Jacobrakai Foundation
   (Donate / Support Jacobrakai Foundation — JACOBRAKAI FOUNDATION 501(c)(3)),
   plus `.github/FUNDING.yml` custom Stripe URL for the GitHub Sponsor button.
@@ -26,6 +94,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   `GET /api/senders/<id>` returns those baselines from existing profile
   tables; `GET /api/messages` now includes `sender_id`. No new persisted
   content; payloads still omit subjects, filenames, full URLs, and body text.
+- Dashboard sync-health status strip: per-account sync time, permanent
+  skip count, and last error surfaced below the header bar with a
+  color-coded health indicator (green/yellow/red). Skip count links to a
+  local-only skip list overlay showing folder, UID, and reason — no
+  message content. New `/api/skipped` endpoint serves the skip list.
+  `skipped_messages` table records permanently skipped messages during
+  sync; `accounts.last_error` stores the most recent per-account error.
 
 ## [0.3.1] — 2026-09-08
 

@@ -110,6 +110,10 @@ one Gmail address, for example, must not establish trust in every Gmail sender.
 - Public Suffix List lookups use `tldextract`'s bundled snapshot with runtime
   fetching disabled; the freemail-domain list lives in
   `src/nodary/feature_extraction/normalize.py`. Nodary fetches neither at runtime.
+  The PSL snapshot identity (version + hash) is recorded in `schema_meta`;
+  when a `tldextract` upgrade changes the bundled list, `nodary status` and
+  the dashboard surface drift. Run `nodary rebuild` to update profiles with
+  the new suffix list.
 - The dashboard binds to `127.0.0.1` and its page has no outbound requests.
   It serves HTTPS via a locally-trusted mkcert certificate when available;
   certificate generation is fully local (no ACME, no Certificate
@@ -140,6 +144,54 @@ uv sync --extra sqlcipher
 | `NODARY_DB_KEY` | keychain-managed | Hex database key override (tests/CI; normally the key lives only in the OS keychain). |
 | `NODARY_MAIL_STORE` | `~/Library/Mail/V10` | Apple Mail store root for the mail-store source. |
 | `NODARY_CERT_DIR` | `~/.nodary/tls` | Dashboard TLS certificate directory. |
+| `NODARY_GMAIL_CLIENT_ID` | — | Gmail OAuth2 client ID (required for auto-refresh). |
+| `NODARY_GMAIL_CLIENT_SECRET` | — | Gmail OAuth2 client secret (if the client is confidential). |
+| `NODARY_M365_CLIENT_ID` | — | Microsoft 365 OAuth2 client ID (required for auto-refresh). |
+| `NODARY_M365_CLIENT_SECRET` | — | Microsoft 365 OAuth2 client secret (if the client is confidential). |
+
+## OAuth2 provider setup
+
+Nodary supports automatic access-token renewal for Gmail and Microsoft 365
+via OAuth2 refresh tokens. Refresh tokens and access tokens are stored in the
+OS keychain only — never in the SQLite database. The token endpoint is the
+**only** non-IMAP outbound network traffic nodary makes.
+
+### Gmail
+
+1. Create a project at <https://console.cloud.google.com/>.
+2. Enable the Gmail API.
+3. Create an OAuth 2.0 client ID (Desktop application).
+4. Note the **Client ID**. The client secret is only needed for confidential
+   clients (nodary uses public client flow by default).
+5. Obtain a refresh token with the `https://mail.google.com/` scope. One
+   method: use `oauth2l` or the Google OAuth 2.0 Playground.
+6. Set the environment variable: `export NODARY_GMAIL_CLIENT_ID=<your-client-id>`
+7. Register: `nodary add-account you@gmail.com --host imap.gmail.com --auth oauth2`
+   — paste the access token when prompted, then the refresh token.
+
+### Microsoft 365
+
+1. Register an app at <https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps>.
+2. Note the **Application (client) ID**.
+3. Under API permissions, add `IMAP.AccessAsUser.All`.
+4. Obtain a refresh token with the
+   `https://outlook.office365.com/IMAP.AccessAsUser.All` scope.
+5. Set the environment variable: `export NODARY_M365_CLIENT_ID=<your-client-id>`
+6. Register: `nodary add-account you@outlook.com --host outlook.office365.com --auth oauth2`
+   — paste the access token when prompted, then the refresh token.
+
+### How auto-refresh works
+
+When the IMAP server rejects the access token (at login or mid-session),
+nodary:
+
+1. Detects the provider from the IMAP host.
+2. POSTs the stored refresh token to the provider's token endpoint.
+3. Writes the new access token to the OS keychain atomically.
+4. Retries the IMAP connection.
+
+If the refresh fails or no refresh token is stored, the error is recorded
+in `accounts.last_error` and the next account is synced normally.
 
 ## CLI
 
@@ -152,10 +204,13 @@ uv run nodary add-account you@example.com --host imap.example.com --auth oauth2
 uv run nodary add-account you@example.com --host imap.example.com --alias alias@example.com
 ```
 
-Update the keychain secret for an existing numeric account ID:
+For OAuth2 accounts, an optional refresh token can be stored to enable
+automatic access-token renewal. Without a refresh token, expired access
+tokens require a manual `set-secret` update.
 
 ```sh
-uv run nodary set-secret 1
+uv run nodary set-secret 1                    # update access token / app password
+uv run nodary set-secret 1 --refresh-token    # update the OAuth2 refresh token
 ```
 
 Run an incremental read-only sync and score new mail:
@@ -169,6 +224,10 @@ Recompute all derived profiles, tiers, and scores from locally stored facts:
 ```sh
 uv run nodary rebuild
 ```
+
+Run `nodary rebuild` after a `tldextract` upgrade to clear PSL drift. The
+`nodary status` command reports whether the bundled Public Suffix List has
+changed since profiles were last built; the dashboard shows a matching banner.
 
 Replay the bundled labeled calibration corpus through the real scoring pipeline
 and print score distributions, feature firing rates, and threshold separation:
@@ -240,6 +299,23 @@ written. Note that Mail stores Gmail messages once under `[Gmail]/All Mail`,
 so incoming and sent Gmail are distinguished by the From header rather than
 by folder.
 
+#### Supported layouts
+
+Nodary probes `~/Library/Mail/` for known layout directories and validates
+the store before syncing. The only verified layout is **V10** (macOS
+Sonoma/Sequoia). Known but unverified layouts (V9, V8, V7, V6) are
+recognised but not yet supported; if your machine uses one of these, set
+`NODARY_MAIL_STORE` to point at the layout directory explicitly. If an
+unsupported layout (e.g. V11) is found, nodary exits with a clear error
+naming the found version and listing supported versions.
+
+To use a non-default layout directory:
+
+```sh
+export NODARY_MAIL_STORE=~/Library/Mail/V10
+uv run nodary sync
+```
+
 ### Incremental sync
 
 For each folder, Nodary stores the server's `UIDVALIDITY` and a
@@ -251,6 +327,51 @@ incoming mail so relationship evidence is available during scoring.
 
 The IMAP transport uses non-mutating fetches. It never sets flags, moves,
 copies, expunges, deletes, or sends mail.
+
+## Machine migration
+
+Nodary supports explicit, one-time export and import of the profile database
+for moving between machines. This is a manual process — there is no automatic
+sync between installations.
+
+### Export
+
+```sh
+uv run nodary export-profile --output ~/nodary-backup.tar.gz
+uv run nodary export-profile --output ~/nodary-backup.tar.gz --include-secrets
+```
+
+The archive contains the SQLite/SQLCipher database and a `manifest.json` with
+the schema version, encryption mode, engine version, user identities, export
+timestamp, and a SHA-256 hash of the database for integrity verification. The
+`--include-secrets` flag adds keychain export guidance text (IMAP credentials
+are never included — they stay in the OS keychain and must be re-entered on
+the target machine).
+
+### Import
+
+```sh
+uv run nodary import-profile --input ~/nodary-backup.tar.gz --target-db ~/.nodary/nodary.db
+uv run nodary import-profile --input ~/nodary-backup.tar.gz --target-db ~/.nodary/nodary.db --force
+```
+
+Import validates the manifest and database hash before restoring. It refuses
+to overwrite an existing database without `--force`. If the archive was
+created with SQLCipher encryption, the target machine must have the
+`sqlcipher` extra installed and the correct database key available (via the
+OS keychain or `NODARY_DB_KEY`). An encryption mode mismatch (plain archive
+into a SQLCipher installation or vice versa) produces a clear error.
+
+After import, re-add IMAP credentials for each account:
+
+```sh
+uv run nodary set-secret <account_id>
+```
+
+> **Threat model note:** the export archive is as sensitive as the live
+> database. It contains all sender profiles, trust tiers, scores, and
+> communication metadata. Transfer it securely (encrypted channel or
+> encrypted medium) and delete it after import.
 
 ## Non-goals for v1
 

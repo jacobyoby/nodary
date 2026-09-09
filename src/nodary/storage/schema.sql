@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS folders (
 
 -- Permanent mail-store fetch failures (corrupt / unparseable .emlx).
 -- Transient gaps are not stored: those retry from last_seen_uid.
--- path/reason only — no message content.
+-- path/reason only — no message content. Scope to an account via
+-- JOIN folders (folders.account_id); do not denormalize account_id here.
 CREATE TABLE IF NOT EXISTS skipped_messages (
   id         INTEGER PRIMARY KEY,
   folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS messages (
   auth_spf            TEXT,
   auth_dkim           TEXT,
   auth_dmarc          TEXT,
+  deleted_upstream    INTEGER NOT NULL DEFAULT 0,
   UNIQUE (folder_id, uid)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id, sent_at);
