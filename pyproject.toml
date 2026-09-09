@@ -19,7 +19,7 @@ sqlcipher = ["sqlcipher3-wheels>=0.5"]
 nodary = "nodary.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+dev = ["pytest>=8.0", "ruff>=0.16.6"]
 
 [build-system]
 requires = ["hatchling"]
