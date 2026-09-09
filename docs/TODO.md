@@ -40,25 +40,28 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 
 ## Near-Term / Hardening
 
-- [ ] OAuth2 refresh-token flow for Gmail/M365. Why: current OAuth2 support
+- [x] OAuth2 refresh-token flow for Gmail/M365. Why: current OAuth2 support
       stores a manually supplied access token and requires `nodary set-secret`
-      when it expires.
-- [ ] Large-mailbox pass: measure a 100k-message backfill, tune
+      when it expires. Shipped in #46 / on main.
+- [x] Large-mailbox pass: measure a 100k-message backfill, tune
       `imap_sync.sync.BATCH_SIZE`, and consider fetching text parts only for
       messages <= N days old. Why: first-run performance and memory behavior
-      need real-mailbox validation.
-- [ ] Package a vendored Public Suffix List snapshot version in `schema_meta`
+      need real-mailbox validation. Shipped in #47 / on main.
+- [x] Package a vendored Public Suffix List snapshot version in `schema_meta`
       and surface drift in the UI. Why: registrable-domain decisions affect
-      scoring and should be auditable across rebuilds.
-- [ ] Generalize schema migrations beyond the current `accounts.auth_method`
+      scoring and should be auditable across rebuilds. Shipped in #46 / on main.
+- [x] Generalize schema migrations beyond the current `accounts.auth_method`
       rebuild. Why: `schema_meta.schema_version` exists, and future table or
       column changes need a reliable upgrade path for existing databases.
-- [ ] Message deletion reconciliation for UIDs that vanish server-side. Why:
+      Shipped in #46 / on main.
+- [x] Message deletion reconciliation for UIDs that vanish server-side. Why:
       retaining local facts is correct for baselines, but deleted/server-missing
       messages should be marked so sync status is understandable.
-- [ ] Mail-store portability checks for Apple Mail layouts beyond verified V10.
+      Shipped in #46 / on main.
+- [x] Mail-store portability checks for Apple Mail layouts beyond verified V10.
       Why: `mail_store.store` currently assumes the V10 layout and should fail
       clearly or support newer layouts when macOS changes them.
+      Shipped in #46 / on main.
 
 ## Mid-Term
 
@@ -66,14 +69,18 @@ work; `CHANGELOG.md` remains the release-history source of truth.
       cheaper than UID range scans for large mailboxes.
 - [ ] Confusables table generation from vendored Unicode UTS #39 skeleton data.
       Why: the current curated subset is auditable but incomplete.
+      Partial on main (generated table + vendored `data/uts39`); held #39 is an
+      alternate expansion — leave open until Jacob/CoS delta call.
 - [x] Dashboard sender drill-down page with baseline histograms and feature
       history. Why: a high score is easier to trust when the underlying sender
       baseline is visible.
 - [ ] Dormant-resurrection median-gap precomputation in `sender_profiles`. Why:
       the scoring engine currently queries message history on demand for that
       rare feature.
-- [ ] Multiple accounts in one dashboard. Why: storage supports accounts, but
+- [x] Multiple accounts in one dashboard. Why: storage supports accounts, but
       the dashboard is not yet account-aware for filtering and comparison.
+      Shipped in #46 / on main (account switcher; dashboard sync-health strip
+      also landed in #46).
 - [ ] Optional IMAP IDLE for near-real-time scoring. Why: polling is enough for
       v1, but IDLE can reduce latency without changing the local-only model.
 
@@ -81,9 +88,9 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 
 - [ ] Local body analysis phase, on-device only and opt-in. Why: semantic or
       content signals may help, but they must not weaken the privacy model.
-- [ ] Export/import of the encrypted profile database for machine migration.
+- [x] Export/import of the encrypted profile database for machine migration.
       Why: moving a local-first installation should be explicit and should not
-      become cross-install sync.
+      become cross-install sync. Shipped in #46 / on main.
 
 ## Explicitly Rejected
 
