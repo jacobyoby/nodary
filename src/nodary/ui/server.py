@@ -216,7 +216,7 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             acct_params,
         ).fetchone()
         unique_in = conn.execute(
-            f"SELECT COUNT(DISTINCT COALESCE(m.message_id, 'row:' || m.id))"
+            f"SELECT COUNT(DISTINCT m.from_email_norm)"
             f" FROM messages m"
             f" JOIN folders f ON f.id = m.folder_id"
             f" WHERE m.direction = 'in' {msg_where}",
@@ -348,6 +348,8 @@ def create_app(conn: sqlite3.Connection) -> Flask:
         out = []
         for r in rows:
             d = _scored_payload(conn, r)
+            d.pop("_rn", None)
+            d.pop("_sender_msg_count", None)
             d["sender_msg_count"] = r["_sender_msg_count"]
             out.append(d)
         return jsonify(out)

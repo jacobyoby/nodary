@@ -109,6 +109,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   `skipped_messages` table records permanently skipped messages during
   sync; `accounts.last_error` stores the most recent per-account error.
 
+### Fixed
+- Per-sender dashboard collapse: the status banner now reads
+  `{senders} senders · {incoming} messages · {hidden} collapsed` instead of
+  a Message-ID-based "dupes hidden" count; `/api/status` `unique_incoming`
+  counts distinct senders; `/api/messages` no longer leaks internal `_rn`
+  and `_sender_msg_count` columns.
+
 ## [0.3.1] — 2026-09-08
 
 ### Added
