@@ -33,8 +33,9 @@ cloud scoring APIs, or emit telemetry.
 - With the `sqlcipher` extra installed, storage uses SQLCipher; otherwise it
   falls back to plain SQLite and records `schema_meta.encryption = none`.
 - Public Suffix List lookup uses `tldextract`'s bundled snapshot with runtime
-  fetching disabled. The freemail list and confusables subset are vendored in
-  `feature_extraction.normalize`.
+  fetching disabled. The freemail list is vendored in `feature_extraction.normalize`;
+  the confusables map is generated at build time from vendored UTS #39 data
+  (`data/uts39/confusables.txt`) — no Unicode downloads at runtime.
 
 ## Dashboard Sync-Health UI
 
@@ -147,8 +148,14 @@ tiers, and scores are regenerated deterministically.
   dots are removed.
 - Registrable domains come from the bundled `tldextract` Public Suffix List
   snapshot.
-- Display names and registrable domains are casefolded through a small
-  vendored UTS #39-style confusables table, plus common digit substitutions.
+- Display names and registrable domains are casefolded through a confusables
+  map generated from vendored UTS #39 data (`data/uts39/confusables.txt`,
+  Unicode 17.0.0) by `scripts/generate_confusables.py`, plus a hand-audited
+  curated subset (digit substitutions and Latin-target Cyrillic/Greek
+  mappings) that overrides the generated entries where they differ. The
+  curated subset is also the fallback when the generated module is absent.
+  To regenerate after updating the vendored data:
+  `python scripts/generate_confusables.py`.
 - Sender-local hour/day come from the UTC offset carried in the `Date` header,
   so behavioral baselines follow the sender's clock rather than the user's.
 - Authentication verdicts are parsed from the receiving server's

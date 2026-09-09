@@ -2,7 +2,9 @@
 
 All rules are versioned constants — changing any of them bumps
 NORMALIZE_VERSION, which invalidates derived profiles (rebuild required).
-No network access: the Public Suffix List is tldextract's bundled snapshot.
+No network access: the Public Suffix List is tldextract's bundled snapshot;
+the confusables map is generated at build time from vendored UTS #39 data
+(data/uts39/confusables.txt) by scripts/generate_confusables.py.
 """
 
 from __future__ import annotations
@@ -96,10 +98,11 @@ FREEMAIL_DOMAINS = frozenset(
 # Providers where dots in the local part are insignificant.
 _DOT_INSENSITIVE = frozenset({"gmail.com", "googlemail.com"})
 
-# Homoglyph folding table (subset of Unicode UTS #39 confusables, plus the
-# digit substitutions actually seen in lookalike domains). Applied after NFKD
-# decomposition strips diacritics. Deliberately small and auditable.
-_CONFUSABLES = {
+# Curated homoglyph folding table — the original hand-audited subset.
+# Used as a fallback when the generated UTS #39 map is absent, and as
+# overrides on top of the generated map (preserving digit substitutions
+# and Latin-target mappings that UTS #39 expresses differently).
+_CONFUSABLES_CURATED: dict[str, str] = {
     # Cyrillic -> Latin
     "а": "a",
     "е": "e",
@@ -150,6 +153,25 @@ _CONFUSABLES = {
     "ⅰ": "i",
     "ⅴ": "v",
 }
+
+
+def _load_confusables() -> dict[str, str]:
+    """Load the generated UTS #39 map with curated overrides on top.
+
+    Falls back to the curated subset alone if the generated module is
+    missing (e.g. the build script hasn't been run).  No network access.
+    """
+    try:
+        from nodary.confusables_generated import CONFUSABLES_MAP
+
+        merged = dict(CONFUSABLES_MAP)
+        merged.update(_CONFUSABLES_CURATED)
+        return merged
+    except ImportError:
+        return dict(_CONFUSABLES_CURATED)
+
+
+_CONFUSABLES = _load_confusables()
 
 _WS_RE = re.compile(r"\s+")
 _URL_HOST_RE = re.compile(
