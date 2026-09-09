@@ -144,6 +144,54 @@ uv sync --extra sqlcipher
 | `NODARY_DB_KEY` | keychain-managed | Hex database key override (tests/CI; normally the key lives only in the OS keychain). |
 | `NODARY_MAIL_STORE` | `~/Library/Mail/V10` | Apple Mail store root for the mail-store source. |
 | `NODARY_CERT_DIR` | `~/.nodary/tls` | Dashboard TLS certificate directory. |
+| `NODARY_GMAIL_CLIENT_ID` | — | Gmail OAuth2 client ID (required for auto-refresh). |
+| `NODARY_GMAIL_CLIENT_SECRET` | — | Gmail OAuth2 client secret (if the client is confidential). |
+| `NODARY_M365_CLIENT_ID` | — | Microsoft 365 OAuth2 client ID (required for auto-refresh). |
+| `NODARY_M365_CLIENT_SECRET` | — | Microsoft 365 OAuth2 client secret (if the client is confidential). |
+
+## OAuth2 provider setup
+
+Nodary supports automatic access-token renewal for Gmail and Microsoft 365
+via OAuth2 refresh tokens. Refresh tokens and access tokens are stored in the
+OS keychain only — never in the SQLite database. The token endpoint is the
+**only** non-IMAP outbound network traffic nodary makes.
+
+### Gmail
+
+1. Create a project at <https://console.cloud.google.com/>.
+2. Enable the Gmail API.
+3. Create an OAuth 2.0 client ID (Desktop application).
+4. Note the **Client ID**. The client secret is only needed for confidential
+   clients (nodary uses public client flow by default).
+5. Obtain a refresh token with the `https://mail.google.com/` scope. One
+   method: use `oauth2l` or the Google OAuth 2.0 Playground.
+6. Set the environment variable: `export NODARY_GMAIL_CLIENT_ID=<your-client-id>`
+7. Register: `nodary add-account you@gmail.com --host imap.gmail.com --auth oauth2`
+   — paste the access token when prompted, then the refresh token.
+
+### Microsoft 365
+
+1. Register an app at <https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps>.
+2. Note the **Application (client) ID**.
+3. Under API permissions, add `IMAP.AccessAsUser.All`.
+4. Obtain a refresh token with the
+   `https://outlook.office365.com/IMAP.AccessAsUser.All` scope.
+5. Set the environment variable: `export NODARY_M365_CLIENT_ID=<your-client-id>`
+6. Register: `nodary add-account you@outlook.com --host outlook.office365.com --auth oauth2`
+   — paste the access token when prompted, then the refresh token.
+
+### How auto-refresh works
+
+When the IMAP server rejects the access token (at login or mid-session),
+nodary:
+
+1. Detects the provider from the IMAP host.
+2. POSTs the stored refresh token to the provider's token endpoint.
+3. Writes the new access token to the OS keychain atomically.
+4. Retries the IMAP connection.
+
+If the refresh fails or no refresh token is stored, the error is recorded
+in `accounts.last_error` and the next account is synced normally.
 
 ## CLI
 
@@ -156,10 +204,13 @@ uv run nodary add-account you@example.com --host imap.example.com --auth oauth2
 uv run nodary add-account you@example.com --host imap.example.com --alias alias@example.com
 ```
 
-Update the keychain secret for an existing numeric account ID:
+For OAuth2 accounts, an optional refresh token can be stored to enable
+automatic access-token renewal. Without a refresh token, expired access
+tokens require a manual `set-secret` update.
 
 ```sh
-uv run nodary set-secret 1
+uv run nodary set-secret 1                    # update access token / app password
+uv run nodary set-secret 1 --refresh-token    # update the OAuth2 refresh token
 ```
 
 Run an incremental read-only sync and score new mail:

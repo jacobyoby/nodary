@@ -9,6 +9,22 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **OAuth2 refresh-token auto-renewal:** access tokens stored in the OS
+  keychain are now refreshed automatically when they expire. Refresh tokens
+  are stored in the OS keychain only (never in SQLite). On IMAP auth failure
+  (at login or mid-session), nodary detects the provider from the IMAP host,
+  POSTs to the provider's token endpoint with the stored refresh token,
+  updates the access token atomically in the keychain, and retries the IMAP
+  connection. Supported providers: Gmail (`imap.gmail.com`) and Microsoft 365
+  (`outlook.office365.com`). Client credentials are configured via
+  environment variables (`NODARY_GMAIL_CLIENT_ID`,
+  `NODARY_GMAIL_CLIENT_SECRET`, `NODARY_M365_CLIENT_ID`,
+  `NODARY_M365_CLIENT_SECRET`). Token endpoints are the ONLY non-IMAP
+  outbound traffic. CLI: `add-account --auth oauth2` prompts for an optional
+  refresh token; `set-secret --refresh-token` updates it. If no refresh
+  token is stored, the existing failure behavior is preserved. Per-account
+  auth failures are recorded in `accounts.last_error` and do not block
+  other accounts.
 - **Server-deleted UID reconciliation:** after each folder sync, nodary
   compares local UIDs against the server's full UID set. Messages that
   disappeared from the server are marked `deleted_upstream = 1` but never

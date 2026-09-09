@@ -11,7 +11,12 @@ import time
 from pathlib import Path
 
 from .storage import db as storage_db
-from .storage.keys import get_account_secret, get_or_create_db_key, set_account_secret
+from .storage.keys import (
+    get_account_secret,
+    get_or_create_db_key,
+    set_account_secret,
+    set_refresh_token,
+)
 
 
 def _open():
@@ -54,17 +59,107 @@ def cmd_add_account(args) -> int:
         )
     conn.commit()
     set_account_secret(account_id, secret)
-    print(f"account #{account_id} added: {args.email} @ {args.host}")
+
     if args.auth == "oauth2":
-        print("note: refresh the token with `nodary set-secret` when it expires.")
+        rt_prompt = "OAuth2 refresh token (optional; stored in OS keychain): "
+        rt = getpass.getpass(rt_prompt)
+        if rt:
+            set_refresh_token(account_id, rt)
+            print(
+                f"account #{account_id} added: {args.email} @ {args.host}"
+                " (refresh token stored; access token will auto-renew)"
+            )
+        else:
+            print(f"account #{account_id} added: {args.email} @ {args.host}")
+            print(
+                "note: no refresh token stored; use"
+                " `nodary set-secret <id> --refresh-token` to enable"
+                " auto-renewal."
+            )
+    else:
+        print(f"account #{account_id} added: {args.email} @ {args.host}")
     return 0
 
 
 def cmd_set_secret(args) -> int:
+    if args.refresh_token:
+        rt = getpass.getpass("New refresh token (stored in OS keychain): ")
+        set_refresh_token(args.account_id, rt)
+        print("refresh token updated.")
+        return 0
     secret = getpass.getpass("New secret (stored in OS keychain): ")
     set_account_secret(args.account_id, secret)
     print("updated.")
     return 0
+
+
+class _AuthExpired(Exception):
+    """Raised when an IMAP auth failure is detected (login or mid-session)."""
+
+
+def _is_auth_error(exc: BaseException) -> bool:
+    """Return True if *exc* looks like an IMAP authentication failure."""
+    text = str(exc).lower()
+    return any(
+        kw in text for kw in ("auth", "login", "invalid credentials", "authentication")
+    )
+
+
+def _oauth2_login_with_refresh(transport, acct, secret: str) -> None:
+    """Attempt IMAP OAuth2 login; on auth failure, try token refresh first.
+
+    Raises ``_AuthExpired`` if the refresh also fails or no refresh token is
+    available.
+    """
+    from .auth import TokenRefreshError, detect_provider, refresh_access_token
+
+    try:
+        transport.login_oauth2(acct["email"], secret)
+    except Exception as exc:
+        if not _is_auth_error(exc):
+            raise
+        provider = detect_provider(acct["imap_host"])
+        if provider is None:
+            raise _AuthExpired(
+                f"account #{acct['id']}: auth failed and provider is unknown"
+                f" (host={acct['imap_host']}); cannot auto-refresh"
+            ) from exc
+        try:
+            new_token = refresh_access_token(acct["id"], provider)
+        except TokenRefreshError as rerr:
+            raise _AuthExpired(str(rerr)) from exc
+        # Retry login with the refreshed token.
+        try:
+            transport.login_oauth2(acct["email"], new_token)
+        except Exception as retry_exc:
+            raise _AuthExpired(
+                f"account #{acct['id']}: login failed after token refresh: {retry_exc}"
+            ) from retry_exc
+
+
+def _try_refresh_and_relogin(transport, acct) -> bool:
+    """Attempt to refresh the token and re-login on an existing transport.
+
+    Returns True on success, False otherwise. On success the transport is
+    re-logged-in and ready for another sync pass.
+    """
+    from .auth import TokenRefreshError, detect_provider, refresh_access_token
+
+    provider = detect_provider(acct["imap_host"])
+    if provider is None:
+        return False
+    try:
+        new_token = refresh_access_token(acct["id"], provider)
+    except TokenRefreshError:
+        return False
+    # Re-login: drop the old connection, create a fresh one.
+    with contextlib.suppress(Exception):
+        transport.logout()
+    transport.client = transport._imapclient.IMAPClient(
+        acct["imap_host"], port=acct["imap_port"], ssl=True
+    )
+    transport.login_oauth2(acct["email"], new_token)
+    return True
 
 
 def cmd_sync(args) -> int:
@@ -141,10 +236,51 @@ def cmd_sync(args) -> int:
             transport = ImapTransport(acct["imap_host"], acct["imap_port"])
             try:
                 if acct["auth_method"] == "oauth2":
-                    transport.login_oauth2(acct["email"], secret)
+                    _oauth2_login_with_refresh(transport, acct, secret)
                 else:
                     transport.login_password(acct["email"], secret)
                 stats = sync_account(conn, transport, acct["id"])
+            except Exception as exc:
+                # Handle auth failures (login-time or mid-session) for
+                # OAuth2 accounts. Non-auth or non-OAuth2 errors propagate.
+                is_auth_expired = isinstance(exc, _AuthExpired)
+                is_mid_session = (
+                    acct["auth_method"] == "oauth2"
+                    and not is_auth_expired
+                    and _is_auth_error(exc)
+                )
+                if not is_auth_expired and not is_mid_session:
+                    raise
+
+                if is_mid_session:
+                    # Token expired mid-session: refresh and retry once.
+                    if _try_refresh_and_relogin(transport, acct):
+                        stats = sync_account(conn, transport, acct["id"])
+                        # Success: fall through to normal output.
+                    else:
+                        msg = (
+                            f"account #{acct['id']}: auth expired"
+                            f" mid-sync and refresh failed: {exc}"
+                        )
+                        print(f"{acct['email']}: {msg}", file=sys.stderr)
+                        conn.execute(
+                            "UPDATE accounts SET last_error = ? WHERE id = ?",
+                            (msg, acct["id"]),
+                        )
+                        conn.commit()
+                        any_failed = True
+                        continue
+                else:
+                    # Login failed and refresh also failed.
+                    msg = str(exc)
+                    print(f"{acct['email']}: {msg}", file=sys.stderr)
+                    conn.execute(
+                        "UPDATE accounts SET last_error = ? WHERE id = ?",
+                        (msg, acct["id"]),
+                    )
+                    conn.commit()
+                    any_failed = True
+                    continue
             finally:
                 transport.logout()
         print(f"{acct['email']}: {stats.new_messages} new messages")
@@ -176,9 +312,7 @@ def cmd_set_source(args) -> int:
         from .mail_store import MailStoreLayoutError, detect_mail_store_root
 
         try:
-            detect_mail_store_root(
-                configured_path=os.environ.get("NODARY_MAIL_STORE")
-            )
+            detect_mail_store_root(configured_path=os.environ.get("NODARY_MAIL_STORE"))
         except MailStoreLayoutError as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -547,6 +681,12 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("set-secret", help="update an account's keychain secret")
     s.add_argument("account_id", type=int)
+    s.add_argument(
+        "--refresh-token",
+        action="store_true",
+        help="update the OAuth2 refresh token instead of the access"
+        " token / app password",
+    )
     s.set_defaults(fn=cmd_set_secret)
 
     y = sub.add_parser("sync", help="incremental read-only sync + scoring")
