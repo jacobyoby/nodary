@@ -10,6 +10,8 @@
    URLs are never written to the database. If a feature needs new data,
    derive the minimal structural value (count, extension, registrable
    domain, histogram bucket) and document it in `docs/DESIGN.md`.
+   `tests/test_privacy_invariants.py` fails CI if a new column or extract
+   path starts keeping that content; see `SECURITY.md`.
 3. **Scoring stays deterministic and explainable.** Every feature returns a
    normalized [0,1] raw value, a registry weight, and a rendered explanation
    string. No opaque models, no randomness, no wall-clock dependence in
@@ -45,3 +47,11 @@
 - Comments explain constraints ("bounded because 100k mailboxes"), not
   mechanics.
 - SQL lives next to the code that owns it; no ORM.
+
+## Schema migrations
+
+Schema changes that cannot be expressed by `CREATE TABLE IF NOT EXISTS`
+(new columns, widened CHECK constraints, new indexes on existing columns)
+go in `src/nodary/storage/migrations/`. See the "Schema Migrations"
+section in `docs/DESIGN.md` for the full pattern. Every migration must
+be idempotent and have a test.

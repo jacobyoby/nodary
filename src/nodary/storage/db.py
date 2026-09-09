@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import contextlib
 import importlib.resources
+import logging
 import os
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = "1"
+logger = logging.getLogger(__name__)
+
+SCHEMA_VERSION = "5"
 
 try:
     import sqlcipher3  # type: ignore
@@ -99,40 +102,37 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
         (encryption,),
     )
     _set_meta_default(conn, "created_at", str(int(time.time())))
+
     conn.commit()
     return conn
 
 
+def get_psl_drift_info(conn: sqlite3.Connection) -> dict:
+    """Return PSL drift information for the given connection.
+
+    Returns a dict with keys:
+    - ``current``: identity of the currently bundled PSL snapshot
+    - ``stored``: identity recorded when profiles were last built
+    - ``drift``: ``True`` when the two differ
+    """
+    from .psl import get_current_psl_identity
+
+    current = get_current_psl_identity()
+    stored = get_meta(conn, "psl_version") or current
+    return {
+        "current": current,
+        "stored": stored,
+        "drift": stored != current,
+    }
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
-    """In-place migrations for databases created by older schemas.
-    `CREATE TABLE IF NOT EXISTS` never updates existing tables, so
-    constraint changes must be applied by rebuilding the table."""
-    accounts_sql = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'"
-    ).fetchone()
-    if accounts_sql and "mail_store" not in accounts_sql["sql"]:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.executescript(
-            """
-            BEGIN;
-            CREATE TABLE accounts_migrated (
-              id          INTEGER PRIMARY KEY,
-              email       TEXT NOT NULL UNIQUE,
-              imap_host   TEXT NOT NULL,
-              imap_port   INTEGER NOT NULL DEFAULT 993,
-              auth_method TEXT NOT NULL CHECK
-                (auth_method IN ('oauth2','app_password','mail_store')),
-              created_at  INTEGER NOT NULL
-            );
-            INSERT INTO accounts_migrated
-              SELECT id, email, imap_host, imap_port, auth_method, created_at
-              FROM accounts;
-            DROP TABLE accounts;
-            ALTER TABLE accounts_migrated RENAME TO accounts;
-            COMMIT;
-            """
-        )
-        conn.execute("PRAGMA foreign_keys = ON")
+    """Run pending schema migrations."""
+    from .migrations import run_migrations
+
+    applied = run_migrations(conn)
+    if applied:
+        logger.info("applied migrations: %s", applied)
 
 
 def _set_meta_default(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -146,6 +146,14 @@ def _set_meta_default(conn: sqlite3.Connection, key: str, value: str) -> None:
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM schema_meta WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else None
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO schema_meta (key, value) VALUES (?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
 
 
 def open_default() -> sqlite3.Connection:

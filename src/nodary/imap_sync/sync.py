@@ -14,9 +14,10 @@ import quopri
 import sqlite3
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 
 from ..feature_extraction.extract import (
     MAX_TEXT_SCAN_BYTES,
@@ -30,6 +31,7 @@ from .bodystructure import PartInfo, walk
 from .client import FetchFailure, Transport
 
 BATCH_SIZE = 200
+TEXT_FETCH_MAX_AGE_DAYS = 90
 _parser = BytesParser(policy=policy.default)
 
 
@@ -38,6 +40,47 @@ class SyncStats:
     new_messages: int = 0
     invalidated_folders: list[str] = field(default_factory=list)
     initial_backfill: bool = False
+    server_deleted: int = 0
+
+
+def reconcile_deleted_uids(
+    conn: sqlite3.Connection,
+    account_id: int,
+    folder_id: int,
+    server_uids: set[int],
+) -> int:
+    """Mark locally-retained messages that no longer exist on the server.
+
+    Rows are never removed — the ``deleted_upstream`` flag is informational
+    only, distinguishing "never fetched" from "deleted upstream" while
+    preserving all facts for behavioral baselines.
+    """
+    local_uids = set(
+        row[0]
+        for row in conn.execute(
+            "SELECT uid FROM messages WHERE folder_id=?",
+            (folder_id,),
+        )
+    )
+    vanished = local_uids - server_uids
+    if vanished:
+        placeholders = ",".join("?" * len(vanished))
+        conn.execute(
+            f"UPDATE messages SET deleted_upstream=1"
+            f" WHERE folder_id=? AND uid IN ({placeholders})",
+            [folder_id] + list(vanished),
+        )
+    # Un-mark any that reappeared (re-fetched after being deleted).
+    reappeared = local_uids & server_uids
+    if reappeared:
+        placeholders = ",".join("?" * len(reappeared))
+        conn.execute(
+            f"UPDATE messages SET deleted_upstream=0"
+            f" WHERE folder_id=? AND uid IN ({placeholders})"
+            f" AND deleted_upstream=1",
+            [folder_id] + list(reappeared),
+        )
+    return len(vanished)
 
 
 def _decode_part(data: bytes, encoding: str) -> bytes | None:
@@ -121,6 +164,18 @@ def _record_permanent_skip(
     )
 
 
+def _message_date(header_bytes: bytes) -> datetime | None:
+    """Parse the Date header from raw header bytes. Returns None on failure."""
+    try:
+        msg = _parser.parsebytes(header_bytes, headersonly=True)
+        dt = parsedate_to_datetime(msg.get("Date", ""))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except Exception:
+        return None
+
+
 def sync_folder(
     conn: sqlite3.Connection,
     transport: Transport,
@@ -129,6 +184,9 @@ def sync_folder(
     role: str,
     my_addrs: frozenset[str],
     stats: SyncStats,
+    *,
+    batch_size: int = BATCH_SIZE,
+    text_fetch_max_age_days: int | None = None,
 ) -> None:
     folder_id = _folder_id(conn, account_id, name, role)
     server = transport.select_readonly(name)
@@ -148,8 +206,9 @@ def sync_folder(
     uids = transport.new_uids(row["last_seen_uid"])
     if row["last_seen_uid"] == 0 and uids:
         stats.initial_backfill = True
-    for start in range(0, len(uids), BATCH_SIZE):
-        batch = uids[start : start + BATCH_SIZE]
+    now = datetime.now(UTC)
+    for start in range(0, len(uids), batch_size):
+        batch = uids[start : start + batch_size]
         fetched = transport.fetch_meta(batch)
         meta = fetched.messages
         permanent = {f.uid: f for f in fetched.permanent_failures}
@@ -174,7 +233,22 @@ def sync_folder(
                 for p in parts
                 if p.is_attachment
             ]
-            link_text, fully = _gather_text(transport, uid, parts)
+            # Age-gated text-part fetch: skip body text retrieval for
+            # messages older than the configured threshold. This saves
+            # significant time and memory during large first-run backfills
+            # where link extraction on old messages provides little value.
+            # Identity features are still scored without body text.
+            skip_text = False
+            if text_fetch_max_age_days is not None:
+                msg_date = _message_date(m["header"])
+                if msg_date is not None:
+                    age_days = (now - msg_date).days
+                    if age_days > text_fetch_max_age_days:
+                        skip_text = True
+            if skip_text:
+                link_text, fully = "", False
+            else:
+                link_text, fully = _gather_text(transport, uid, parts)
             _, from_addr = parseaddr(str(msg.get("From", "")))
             # Self-From alone must not bypass scoring. A genuine self-sent
             # copy lives in the Sent folder or carries a receiving-server
@@ -207,13 +281,25 @@ def sync_folder(
             )
             conn.commit()
         if missing:
-            return  # gap: everything from min(missing) on retries next sync
+            break  # gap: everything from min(missing) on retries next sync
+
+    # Reconcile: mark locally-retained messages that vanished from the server.
+    # new_uids(0) returns all server UIDs (UID > 0), cheap for both IMAP
+    # (one SEARCH) and the mail store (one SQL query).
+    all_server_uids = set(transport.new_uids(0))
+    n_deleted = reconcile_deleted_uids(conn, account_id, folder_id, all_server_uids)
+    if n_deleted:
+        conn.commit()
+    stats.server_deleted += n_deleted
 
 
 def sync_account(
     conn: sqlite3.Connection,
     transport: Transport,
     account_id: int,
+    *,
+    batch_size: int = BATCH_SIZE,
+    text_fetch_max_age_days: int | None = None,
 ) -> SyncStats:
     # normalize both sides: stored identities may predate normalization
     # (e.g. dotted gmail addresses), and the From header is always raw
@@ -232,5 +318,15 @@ def sync_account(
         transport.list_sync_folders(), key=lambda f: 0 if f[1] == "sent" else 1
     )
     for name, role in folders:
-        sync_folder(conn, transport, account_id, name, role, my_addrs, stats)
+        sync_folder(
+            conn,
+            transport,
+            account_id,
+            name,
+            role,
+            my_addrs,
+            stats,
+            batch_size=batch_size,
+            text_fetch_max_age_days=text_fetch_max_age_days,
+        )
     return stats

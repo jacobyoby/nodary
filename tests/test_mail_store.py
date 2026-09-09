@@ -5,7 +5,12 @@ import pytest
 
 from nodary.imap_sync.bodystructure import walk
 from nodary.imap_sync.sync import sync_account
-from nodary.mail_store import MailStore, MailStoreTransport
+from nodary.mail_store import (
+    MailStore,
+    MailStoreLayoutError,
+    MailStoreTransport,
+    detect_mail_store_root,
+)
 
 UUID = "AAAA1111-2222-3333-4444-555566667777"
 
@@ -265,3 +270,104 @@ def test_corrupt_partial_emlx_is_transient(store, conn):
     assert t.skipped_transient == 1
     assert t.skipped_permanent == 0
     assert conn.execute("SELECT COUNT(*) FROM skipped_messages").fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Layout detection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_layout(base, version: str, with_index: bool = True):
+    """Create a layout directory under *base* with optional Envelope Index."""
+    layout = base / version
+    if with_index:
+        maildata = layout / "MailData"
+        maildata.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(maildata / "Envelope Index")
+        conn.execute("CREATE TABLE mailboxes (ROWID INTEGER PRIMARY KEY, url TEXT)")
+        conn.execute(
+            "CREATE TABLE messages (ROWID INTEGER PRIMARY KEY, mailbox INTEGER,"
+            " sender INTEGER, deleted INTEGER DEFAULT 0)"
+        )
+        conn.execute("CREATE TABLE addresses (ROWID INTEGER PRIMARY KEY, address TEXT)")
+        conn.commit()
+        conn.close()
+    else:
+        layout.mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def test_detect_supported_layout(tmp_path, monkeypatch):
+    """A supported layout (V10) with an Envelope Index stub is detected."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    _make_layout(tmp_path / "Library" / "Mail", "V10")
+    root = detect_mail_store_root()
+    assert root.name == "V10"
+    assert (root / "MailData" / "Envelope Index").is_file()
+
+
+def test_detect_unsupported_layout(tmp_path, monkeypatch):
+    """An unsupported layout (V11 only) fails with a clear error."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    _make_layout(tmp_path / "Library" / "Mail", "V11")
+    with pytest.raises(MailStoreLayoutError) as exc:
+        detect_mail_store_root()
+    err = exc.value
+    assert err.found_version == "V11"
+    assert "V11" in str(err)
+    assert "unsupported" in str(err).lower()
+
+
+def test_detect_multiple_versions_picks_newest_supported(tmp_path, monkeypatch):
+    """When multiple layouts exist, the newest supported one is picked."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    _make_layout(tmp_path / "Library" / "Mail", "V10")
+    _make_layout(tmp_path / "Library" / "Mail", "V9")
+    root = detect_mail_store_root()
+    assert root.name == "V10"
+
+
+def test_detect_no_mail_dir(tmp_path, monkeypatch):
+    """No ~/Library/Mail/ directory fails with a clear error."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    with pytest.raises(MailStoreLayoutError) as exc:
+        detect_mail_store_root()
+    err = exc.value
+    assert err.found_version is None
+    assert "not found" in str(err).lower()
+
+
+def test_detect_explicit_valid_path(tmp_path, monkeypatch):
+    """Explicit configured_path to a valid V10 succeeds even without ~/Library/Mail."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    layout = _make_layout(tmp_path / "custom" / "mail", "V10")
+    root = detect_mail_store_root(configured_path=str(layout))
+    assert root == layout
+
+
+def test_detect_explicit_parent_dir(tmp_path, monkeypatch):
+    """Explicit configured_path to a parent dir containing V10 succeeds."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    parent = tmp_path / "custom" / "mail"
+    _make_layout(parent, "V10")
+    root = detect_mail_store_root(configured_path=str(parent))
+    assert root.name == "V10"
+
+
+def test_detect_explicit_bad_path(tmp_path, monkeypatch):
+    """Explicit configured_path to a nonexistent path fails clearly."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    bad = tmp_path / "does" / "not" / "exist"
+    with pytest.raises(MailStoreLayoutError) as exc:
+        detect_mail_store_root(configured_path=str(bad))
+    assert "does not exist" in str(exc.value).lower()
+
+
+def test_detect_explicit_empty_dir(tmp_path, monkeypatch):
+    """Explicit configured_path to an existing dir with no layout fails clearly."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    empty = tmp_path / "empty_dir"
+    empty.mkdir()
+    with pytest.raises(MailStoreLayoutError) as exc:
+        detect_mail_store_root(configured_path=str(empty))
+    assert "no recognised layout" in str(exc.value).lower()

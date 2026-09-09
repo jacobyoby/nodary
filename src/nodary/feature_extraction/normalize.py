@@ -12,7 +12,7 @@ import re
 import unicodedata
 from functools import lru_cache
 
-from ._confusables_data import CONFUSABLES as _CONFUSABLES
+from ._confusables_data import CONFUSABLES as _CONFUSABLES_SNAPSHOT
 
 NORMALIZE_VERSION = 2
 
@@ -103,6 +103,60 @@ _DOT_INSENSITIVE = frozenset({"gmail.com", "googlemail.com"})
 # plus the historical ASCII overlays in scripts/generate_confusables.py.
 # Applied after NFKD decomposition strips diacritics. Do not edit the
 # snapshot by hand — see docs/DESIGN.md (Normalization).
+_CONFUSABLES_CURATED: dict[str, str] = {
+    # Cyrillic -> Latin
+    "а": "a",
+    "е": "e",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "х": "x",
+    "у": "y",
+    "і": "i",
+    "ѕ": "s",
+    "ј": "j",
+    "ԁ": "d",
+    "ɡ": "g",
+    "һ": "h",
+    "к": "k",
+    "м": "m",
+    "т": "t",
+    "в": "b",
+    "н": "h",
+    "ѡ": "w",
+    "ѵ": "v",
+    "ꞅ": "s",
+    # Greek -> Latin
+    "α": "a",
+    "β": "b",
+    "ε": "e",
+    "η": "n",
+    "ι": "i",
+    "κ": "k",
+    "ν": "v",
+    "ο": "o",
+    "ρ": "p",
+    "τ": "t",
+    "υ": "u",
+    "ω": "w",
+    # Digits / symbols commonly used as letters
+    "0": "o",
+    "1": "l",
+    "3": "e",
+    "5": "s",
+    "ø": "o",
+    "ł": "l",
+    "đ": "d",
+    # Latin lookalikes
+    "ı": "i",
+    "ǀ": "l",
+    "ⅼ": "l",
+    "ⅰ": "i",
+    "ⅴ": "v",
+}
+
+_CONFUSABLES = dict(_CONFUSABLES_SNAPSHOT)
+_CONFUSABLES.update(_CONFUSABLES_CURATED)
 
 _WS_RE = re.compile(r"\s+")
 _URL_HOST_RE = re.compile(
