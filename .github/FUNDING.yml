@@ -1,0 +1,4 @@
+# GitHub Sponsor button: custom Stripe Payment Link for JACOBRAKAI FOUNDATION.
+# Stripe is not a built-in FUNDING.yml platform; custom URLs are the documented
+# way to surface a Payment Link (up to four). Quote required because of ":".
+custom: ["https://donate.stripe.com/eVq4gy97DanS9h60phfrW00"]
