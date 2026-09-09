@@ -122,6 +122,13 @@ one Gmail address, for example, must not establish trust in every Gmail sender.
 `tests/test_privacy_invariants.py` fails CI if a new column or extract path
 starts keeping forbidden content. `SECURITY.md` is the threat-model stub.
 
+One database is one operator. Multiple IMAP or mail-store accounts in the
+same `NODARY_DB` share a single sender graph — intended for one person with
+several inboxes, not for two people. Use a separate install or
+`NODARY_DB` path per person. `export-profile` / `import-profile` move a
+database between machines; they do not sync users. See `docs/DESIGN.md`
+(Mailbox vs user vs policy).
+
 ## Install
 
 Nodary requires Python 3.12 or later and uses `uv` for the documented setup.
@@ -339,8 +346,9 @@ copies, expunges, deletes, or sends mail.
 ## Machine migration
 
 Nodary supports explicit, one-time export and import of the profile database
-for moving between machines. This is a manual process — there is no automatic
-sync between installations.
+for moving between machines. This is a single-operator migration path — there
+is no automatic sync between installations, and it is not a way for two
+people to share or merge profiles.
 
 ### Export
 

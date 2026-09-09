@@ -73,6 +73,67 @@ When viewing all accounts, the status strip shows per-account pills with
 last sync time and skip count. When viewing a single account, only that
 account's pill is shown and all counts reflect only that account's data.
 
+The filter scopes the review UI. Sender baselines remain shared across
+accounts; see Mailbox vs user vs policy.
+
+## Mailbox vs user vs policy
+
+**Multi-mailbox is supported.** One install and one local database can
+hold many `accounts`, each with its own identities, folders,
+credentials, and sync state. Per-account sync continues after a failure
+(#14). The dashboard account filter (`?account=<id>|all`) is shipped
+(#34 / #46). Cross-account Message-ID dedupe and explicit
+`export-profile` / `import-profile` are supported. Live cross-install
+sync is not.
+
+**Multi-user and org tenancy are not supported.** There is no OS-user
+isolation, household sharing, tenant membership, RBAC, or admin console
+that pushes policy to other installs. One human (or one operator of one
+machine) owns the install and the profile DB. Explicitly Rejected:
+cross-install score or profile sync, cloud scoring, shared reputation
+feeds, and telemetry of any kind.
+
+Two people must not share one database. Give each person a separate
+install or a separate `NODARY_DB` path. `export-profile` /
+`import-profile` move one operator's database between machines; they
+are machine migration, not multi-user sync.
+
+### Sender graph scope (current)
+
+Mailbox facts are account-scoped (`accounts`, `user_identities`,
+`folders`, messages via `folder_id`). Mailboxes are separate. The
+relationship graph is shared: `senders.email_norm` is UNIQUE
+database-wide, and `sender_profiles`, `domain_profiles`, trust tiers,
+and scores blend evidence from every account on that install. That is
+install-global by design.
+
+Dashboard `?account=` filtering restricts the message list and status
+strip. It does not partition sender baselines. A sender-baseline view
+is install-global unless a surface is explicitly labeled otherwise.
+
+Issue #34's dashboard work scoped account filtering and said there
+would be "no merging [of sender identities] beyond existing
+normalization." That constraint applies to UI/list presentation. The
+schema still blends senders by `email_norm`. That is an intentional
+product stance — one operator's mail universe — not a bug. Work and
+personal mailboxes in the same DB therefore share BEC baselines, Tier
+credit, and domain-profile evidence.
+
+### What "organization" and "rules" mean today
+
+- Trust **tier rules** (`scoring/tiers.py`) are computed first-match
+  heuristics (Tier 3→0), not user-editable policy.
+- Tier 1 "organization known" means a known non-freemail registrable
+  domain that already has a replied thread. It is not multi-tenant org
+  membership or admin policy.
+- The scoring **registry** (`scoring/registry.py`, `ENGINE_VERSION`) is
+  hardcoded weights/thresholds — not per-user or org policy packs.
+
+There is no table or API for allowlists, VIP lists, weight overrides,
+or shared policy. Policy packs, schema changes that partition the
+sender graph, and a multi-database launcher are out of scope here.
+Org-pushed / cloud policy remains Explicitly Rejected.
+
 ## Main Components
 
 - `cli.py` provides `add-account`, `set-secret`, `set-source`, `sync`,

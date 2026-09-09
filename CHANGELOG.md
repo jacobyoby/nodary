@@ -8,6 +8,16 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Changed
+- **Docs:** DESIGN.md, README, and TODO.md spell out the multi-mailbox vs
+  multi-user boundary. One database is one operator's mail universe.
+  Multiple `accounts` share the install-global `senders` graph
+  (`email_norm` UNIQUE); the dashboard account filter scopes the review
+  UI, not separate baselines. Two people need separate installs or
+  `NODARY_DB` paths. `export-profile` / `import-profile` is machine
+  migration, not multi-user sync. Org/cloud tenancy, household sharing,
+  and pushed policy remain Explicitly Rejected.
+
 ### Added
 - **Large-mailbox performance:** age-gated text-part fetch
   (`--text-fetch-age-days N`, default 90) skips body text retrieval for

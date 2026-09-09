@@ -83,6 +83,10 @@ work; `CHANGELOG.md` remains the release-history source of truth.
       also landed in #46).
 - [ ] Optional IMAP IDLE for near-real-time scoring. Why: polling is enough for
       v1, but IDLE can reduce latency without changing the local-only model.
+- [ ] Product decision on install-global vs account-scoped sender/domain
+      baselines for multi-mailbox installs. Why: work+personal blend is
+      current schema behavior and needs an explicit stance before schema
+      changes.
 
 ## Later / Research
 
@@ -97,3 +101,7 @@ work; `CHANGELOG.md` remains the release-history source of truth.
 - Telemetry of any kind, including "anonymous" usage stats.
 - Cloud scoring APIs, shared reputation feeds, or cross-install score sharing.
 - Auto-delete, auto-move, auto-report, quarantine, or any other mailbox action.
+- Multi-user / household sharing, org admin consoles, or pushed policy CDNs
+  that distribute rules or reputation across installs.
+- Cross-install sync of profiles, scores, or policy (beyond explicit
+  user-driven `export-profile` / `import-profile`).
