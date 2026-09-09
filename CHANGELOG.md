@@ -9,6 +9,16 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **Mail-store layout detection:** nodary now probes `~/Library/Mail/` for
+  known Apple Mail layout directories (V10, V9, V8, V7, V6) and validates
+  the store before syncing or switching sources. Only V10 is verified
+  (`SUPPORTED_LAYOUTS`); if an unsupported layout (e.g. V11) is found,
+  nodary exits with a clear error naming the found version, listing
+  supported versions, and explaining how to set `NODARY_MAIL_STORE`. The
+  detection runs at `set-source mail-store` (before clearing facts) and at
+  sync start. `MailStoreLayoutError` carries the probed path, found
+  version, and supported list for programmatic consumers. Replaces the
+  previous hardcoded `~/Library/Mail/V10` fallback.
 - **Expanded confusables coverage:** lookalike-domain detection now uses a
   confusables map generated from vendored Unicode UTS #39 data (Unicode
   17.0.0, ~6 300 mappings) instead of the original ~40-entry curated

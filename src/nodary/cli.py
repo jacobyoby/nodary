@@ -81,10 +81,14 @@ def cmd_sync(args) -> int:
     any_failed = False
     for acct in accounts:
         if acct["auth_method"] == "mail_store":
-            from .mail_store import MailStore, MailStoreTransport
+            from .mail_store import MailStore, MailStoreLayoutError, MailStoreTransport
 
             if mail_store is None:
-                mail_store = MailStore()
+                try:
+                    mail_store = MailStore()
+                except MailStoreLayoutError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 1
             # primary address first; aliases only as fallback. Identities may
             # be shared across accounts, so an alias can point at a store
             # that belongs to a different account — each store UUID may be
@@ -164,6 +168,18 @@ def cmd_set_source(args) -> int:
     if row is None:
         print(f"no account #{args.account_id}", file=sys.stderr)
         return 1
+    # Validate the mail-store layout before committing the switch, so we
+    # never clear facts for a source that cannot be read.
+    if args.source == "mail-store":
+        from .mail_store import MailStoreLayoutError, detect_mail_store_root
+
+        try:
+            detect_mail_store_root(
+                configured_path=os.environ.get("NODARY_MAIL_STORE")
+            )
+        except MailStoreLayoutError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     method = "mail_store" if args.source == "mail-store" else args.auth
     conn.execute(
         "UPDATE accounts SET auth_method = ? WHERE id = ?",

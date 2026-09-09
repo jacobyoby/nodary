@@ -240,6 +240,23 @@ written. Note that Mail stores Gmail messages once under `[Gmail]/All Mail`,
 so incoming and sent Gmail are distinguished by the From header rather than
 by folder.
 
+#### Supported layouts
+
+Nodary probes `~/Library/Mail/` for known layout directories and validates
+the store before syncing. The only verified layout is **V10** (macOS
+Sonoma/Sequoia). Known but unverified layouts (V9, V8, V7, V6) are
+recognised but not yet supported; if your machine uses one of these, set
+`NODARY_MAIL_STORE` to point at the layout directory explicitly. If an
+unsupported layout (e.g. V11) is found, nodary exits with a clear error
+naming the found version and listing supported versions.
+
+To use a non-default layout directory:
+
+```sh
+export NODARY_MAIL_STORE=~/Library/Mail/V10
+uv run nodary sync
+```
+
 ### Incremental sync
 
 For each folder, Nodary stores the server's `UIDVALIDITY` and a

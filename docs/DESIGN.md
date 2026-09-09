@@ -83,6 +83,34 @@ account's pill is shown and all counts reflect only that account's data.
 - `mail_store.MailStoreTransport` is the local Apple Mail source. It opens the
   Envelope Index read-only, resolves `.emlx`/`.partial.emlx` files, and exposes
   the same transport protocol as IMAP.
+
+## Mail-Store Layout Detection
+
+Apple Mail's on-disk store lives under `~/Library/Mail/` and uses versioned
+layout directories (V6, V7, V8, V9, V10, …). The internal file layout —
+Envelope Index path, reversed-digit bucketing for `.emlx` files, mbox
+naming — can change between versions.
+
+`detect_mail_store_root()` validates the store before any data is read. It
+runs at two points:
+
+1. **`set-source mail-store`** — before clearing existing synced facts.
+   If detection fails, the account is not switched and no data is lost.
+2. **`sync`** — before constructing `MailStore`. If detection fails, sync
+   exits non-zero with a clear error and no partial writes.
+
+The detector prefers the newest supported layout when multiple version
+directories exist. `SUPPORTED_LAYOUTS` (currently `{"V10"}`) is the set of
+layouts verified against the current code. `KNOWN_ROOTS` lists all
+directory names the detector recognises, ordered newest-first. When an
+unsupported layout is found (e.g. V11 exists but V10 does not), the error
+names the found version, lists supported versions, and explains how to set
+`NODARY_MAIL_STORE` to override detection.
+
+`MailStoreLayoutError` carries the probed path, the found version string
+(or `None`), and the supported set, so programmatic callers can
+differentiate "no Mail at all" from "Mail exists but wrong version".
+
 - `imap_sync.sync` owns folder selection, UIDVALIDITY/high-water-mark sync,
   bounded text-part fetch, direction detection, and handoff to the pipeline.
 - `feature_extraction.extract` converts headers plus structure/text snippets
