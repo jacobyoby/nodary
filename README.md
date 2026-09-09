@@ -252,6 +252,51 @@ incoming mail so relationship evidence is available during scoring.
 The IMAP transport uses non-mutating fetches. It never sets flags, moves,
 copies, expunges, deletes, or sends mail.
 
+## Machine migration
+
+Nodary supports explicit, one-time export and import of the profile database
+for moving between machines. This is a manual process — there is no automatic
+sync between installations.
+
+### Export
+
+```sh
+uv run nodary export-profile --output ~/nodary-backup.tar.gz
+uv run nodary export-profile --output ~/nodary-backup.tar.gz --include-secrets
+```
+
+The archive contains the SQLite/SQLCipher database and a `manifest.json` with
+the schema version, encryption mode, engine version, user identities, export
+timestamp, and a SHA-256 hash of the database for integrity verification. The
+`--include-secrets` flag adds keychain export guidance text (IMAP credentials
+are never included — they stay in the OS keychain and must be re-entered on
+the target machine).
+
+### Import
+
+```sh
+uv run nodary import-profile --input ~/nodary-backup.tar.gz --target-db ~/.nodary/nodary.db
+uv run nodary import-profile --input ~/nodary-backup.tar.gz --target-db ~/.nodary/nodary.db --force
+```
+
+Import validates the manifest and database hash before restoring. It refuses
+to overwrite an existing database without `--force`. If the archive was
+created with SQLCipher encryption, the target machine must have the
+`sqlcipher` extra installed and the correct database key available (via the
+OS keychain or `NODARY_DB_KEY`). An encryption mode mismatch (plain archive
+into a SQLCipher installation or vice versa) produces a clear error.
+
+After import, re-add IMAP credentials for each account:
+
+```sh
+uv run nodary set-secret <account_id>
+```
+
+> **Threat model note:** the export archive is as sensitive as the live
+> database. It contains all sender profiles, trust tiers, scores, and
+> communication metadata. Transfer it securely (encrypted channel or
+> encrypted medium) and delete it after import.
+
 ## Non-goals for v1
 
 - No NLP, semantic classification, or body-content analysis.

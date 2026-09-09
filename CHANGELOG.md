@@ -9,6 +9,15 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **Machine migration:** `export-profile` and `import-profile` CLI commands
+  for explicit, one-time transfer of the profile database between machines.
+  Export writes a `.tar.gz` archive containing the database and a
+  `manifest.json` (schema version, encryption mode, engine version, user
+  identities, export timestamp, SHA-256 hash). Import validates the manifest
+  and hash before restoring, refuses to overwrite without `--force`, and
+  produces clear errors on encryption mode mismatches. The archive is as
+  sensitive as the live database — IMAP secrets are never included and must
+  be re-entered on the target machine via `nodary set-secret`.
 - README donate Payment Link for Jacobrakai Foundation
   (Donate / Support Jacobrakai Foundation — JACOBRAKAI FOUNDATION 501(c)(3)),
   plus `.github/FUNDING.yml` custom Stripe URL for the GitHub Sponsor button.

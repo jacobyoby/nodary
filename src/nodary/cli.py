@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
+import os
 import sys
 import time
+from pathlib import Path
 
 from .storage import db as storage_db
 from .storage.keys import get_account_secret, get_or_create_db_key, set_account_secret
@@ -242,6 +245,232 @@ def cmd_calibrate(args) -> int:
     return 0
 
 
+def cmd_export_profile(args) -> int:
+    import hashlib
+    import json
+    import tarfile
+    import tempfile
+    from datetime import UTC, datetime
+
+    from .scoring.registry import ENGINE_VERSION
+
+    db_path = storage_db.default_db_path()
+    if not db_path.exists():
+        print(f"no database found at {db_path}", file=sys.stderr)
+        return 1
+
+    # Open DB to read metadata; checkpoint WAL so the file is self-contained.
+    conn = _open()
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    schema_version = storage_db.get_meta(conn, "schema_version") or "unknown"
+    encryption_mode = storage_db.get_meta(conn, "encryption") or "none"
+    identities = [
+        r["email_norm"]
+        for r in conn.execute(
+            "SELECT DISTINCT email_norm FROM user_identities"
+        ).fetchall()
+    ]
+    conn.close()
+
+    # Read raw DB for hashing
+    db_bytes = db_path.read_bytes()
+    db_hash = hashlib.sha256(db_bytes).hexdigest()
+
+    # Map internal mode to human-readable
+    mode_label = "plain" if encryption_mode == "none" else encryption_mode
+
+    manifest = {
+        "schema_version": schema_version,
+        "encryption_mode": mode_label,
+        "engine_version": ENGINE_VERSION,
+        "psl_identity": identities,
+        "exported_at": datetime.now(UTC).isoformat(),
+        "db_hash": db_hash,
+    }
+
+    output_path = args.output
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
+        manifest_path = tmppath / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+        db_copy = tmppath / "nodary.db"
+        db_copy.write_bytes(db_bytes)
+
+        guidance_name = "keychain_guidance.txt"
+        if args.include_secrets:
+            guidance_text = (
+                "Keychain Export Guidance\n"
+                "========================\n\n"
+                "This archive does NOT contain IMAP passwords or OAuth tokens.\n"
+                "Those secrets live only in the OS keychain and must be\n"
+                "re-entered on the target machine.\n\n"
+                "After importing on the target machine:\n"
+                "  1. Run: nodary set-secret <account_id>\n"
+                "     for each account to re-enter the IMAP credential.\n"
+                "  2. The SQLCipher database key is managed by the OS\n"
+                "     keychain. A new key will be generated automatically\n"
+                "     on first use if one does not exist.\n"
+                "  3. If the imported database uses SQLCipher, set\n"
+                "     NODARY_DB_KEY to the source machine's key (hex)\n"
+                "     or re-export without encryption.\n"
+            )
+            guidance_path = tmppath / guidance_name
+            guidance_path.write_text(guidance_text)
+
+        with tarfile.open(output_path, "w:gz") as tar:
+            tar.add(manifest_path, arcname="manifest.json")
+            tar.add(db_copy, arcname="nodary.db")
+            if args.include_secrets:
+                tar.add(guidance_path, arcname=guidance_name)
+
+    print(f"exported profile to {output_path}")
+    print(f"  encryption_mode: {mode_label}")
+    print(f"  db_hash: {db_hash[:16]}…")
+    print(f"  identities: {', '.join(identities) if identities else 'none'}")
+    print()
+    print("⚠  this archive is as sensitive as the live database.")
+    print("   it contains all sender profiles, scores, and")
+    print("   communication metadata. transfer securely and")
+    print("   delete after import.")
+
+    return 0
+
+
+def cmd_import_profile(args) -> int:
+    import hashlib
+    import json
+    import tarfile
+    import tempfile
+
+    input_path = Path(args.input)
+    target_path = Path(args.target_db)
+
+    if not input_path.exists():
+        print(f"archive not found: {input_path}", file=sys.stderr)
+        return 1
+
+    if target_path.exists() and not args.force:
+        print(f"target database already exists: {target_path}", file=sys.stderr)
+        print("use --force to overwrite", file=sys.stderr)
+        return 1
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            with tarfile.open(input_path, "r:gz") as tar:
+                tar.extractall(tmpdir, filter="data")
+        except (tarfile.TarError, Exception) as exc:
+            print(f"invalid archive: {exc}", file=sys.stderr)
+            return 1
+
+        manifest_file = Path(tmpdir) / "manifest.json"
+        db_file = Path(tmpdir) / "nodary.db"
+
+        if not manifest_file.exists():
+            print("invalid archive: missing manifest.json", file=sys.stderr)
+            return 1
+        if not db_file.exists():
+            print("invalid archive: missing nodary.db", file=sys.stderr)
+            return 1
+
+        try:
+            manifest = json.loads(manifest_file.read_text())
+        except json.JSONDecodeError as exc:
+            print(f"invalid manifest: {exc}", file=sys.stderr)
+            return 1
+
+        for field in ("schema_version", "encryption_mode", "engine_version", "db_hash"):
+            if field not in manifest:
+                print(f"invalid manifest: missing '{field}'", file=sys.stderr)
+                return 1
+
+        # Verify integrity
+        db_bytes = db_file.read_bytes()
+        actual_hash = hashlib.sha256(db_bytes).hexdigest()
+        if actual_hash != manifest["db_hash"]:
+            print("hash mismatch: archive may be corrupted", file=sys.stderr)
+            print(f"  expected: {manifest['db_hash']}", file=sys.stderr)
+            print(f"  actual:   {actual_hash}", file=sys.stderr)
+            return 1
+
+        encryption_mode = manifest["encryption_mode"]
+
+        # Encryption mode mismatch checks
+        if encryption_mode == "sqlcipher" and not storage_db.HAVE_SQLCIPHER:
+            print(
+                "error: archive was created with SQLCipher encryption but "
+                "this installation does not have sqlcipher3 installed.",
+                file=sys.stderr,
+            )
+            print(
+                "install with: uv sync --extra sqlcipher",
+                file=sys.stderr,
+            )
+            return 1
+
+        if encryption_mode == "plain" and storage_db.HAVE_SQLCIPHER:
+            print(
+                "error: archive contains a plain-text database but this "
+                "installation expects SQLCipher encryption.",
+                file=sys.stderr,
+            )
+            print(
+                "re-export from the source with sqlcipher installed, or "
+                "import on a machine without the sqlcipher extra.",
+                file=sys.stderr,
+            )
+            return 1
+
+        # Validate SQLCipher key if encrypted
+        if encryption_mode == "sqlcipher":
+            try:
+                key = get_or_create_db_key()
+            except Exception as exc:
+                print(f"cannot retrieve database key: {exc}", file=sys.stderr)
+                return 1
+            # Validate the key works on the imported DB
+            try:
+                test_conn = storage_db.connect(db_file, key)
+                test_conn.close()
+            except Exception:
+                print(
+                    "error: cannot open the imported SQLCipher database "
+                    "with the available key.",
+                    file=sys.stderr,
+                )
+                print(
+                    "set NODARY_DB_KEY to the source machine's database key "
+                    "(64 hex chars) and try again.",
+                    file=sys.stderr,
+                )
+                return 1
+
+        # Restore DB to target path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(db_bytes)
+        with contextlib.suppress(OSError):
+            os.chmod(target_path, 0o600)
+
+    identities = manifest.get("psl_identity", [])
+    print(f"imported profile to {target_path}")
+    print(f"  schema_version: {manifest['schema_version']}")
+    print(f"  encryption_mode: {encryption_mode}")
+    print(f"  engine_version: {manifest['engine_version']}")
+    if identities:
+        print(f"  identities: {', '.join(identities)}")
+    print()
+    default = storage_db.default_db_path()
+    print("to use this database:")
+    print(f"  export NODARY_DB={target_path}")
+    if str(target_path) != str(default):
+        print(f"  # or copy to {default}")
+    print()
+    print("re-add IMAP credentials for each account:")
+    print("  nodary set-secret <account_id>")
+
+    return 0
+
+
 def cmd_ui(args) -> int:
     from .ui import run
 
@@ -310,6 +539,31 @@ def main(argv: list[str] | None = None) -> int:
         help="serve plain HTTP even if a local mkcert certificate is available",
     )
     u.set_defaults(fn=cmd_ui)
+
+    ep = sub.add_parser(
+        "export-profile",
+        help="export the profile database as an archive for machine migration",
+    )
+    ep.add_argument("--output", required=True, help="output archive path (.tar.gz)")
+    ep.add_argument(
+        "--include-secrets",
+        action="store_true",
+        help="include keychain export guidance (secrets are never included)",
+    )
+    ep.set_defaults(fn=cmd_export_profile)
+
+    ip = sub.add_parser(
+        "import-profile",
+        help="import a profile database archive from machine migration",
+    )
+    ip.add_argument("--input", required=True, help="input archive path (.tar.gz)")
+    ip.add_argument(
+        "--target-db", required=True, help="target database path to restore to"
+    )
+    ip.add_argument(
+        "--force", action="store_true", help="overwrite an existing database"
+    )
+    ip.set_defaults(fn=cmd_import_profile)
 
     args = p.parse_args(argv)
     return args.fn(args)
