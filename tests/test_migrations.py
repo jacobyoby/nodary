@@ -519,9 +519,7 @@ def test_auth_method_migration_noop_when_already_migrated(tmp_path):
     )
 
     # Original row must still exist.
-    row = conn.execute(
-        "SELECT id, email FROM accounts WHERE id = 100"
-    ).fetchone()
+    row = conn.execute("SELECT id, email FROM accounts WHERE id = 100").fetchone()
     assert row is not None, "account row must survive migration"
     assert row["email"] == "bob@example.com"
 
