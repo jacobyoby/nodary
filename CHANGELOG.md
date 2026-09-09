@@ -9,6 +9,14 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **PSL snapshot version tracking:** the bundled Public Suffix List identity
+  (`tldextract` version + SHA-256 of the snapshot) is recorded in
+  `schema_meta` on first connect (migration 004). `connect()` detects drift
+  between the stored PSL version (from when profiles were last built) and
+  the current bundled snapshot. `nodary status` prints both versions and a
+  warning when they differ; the dashboard shows a banner advising
+  `nodary rebuild`. `rebuild` updates the stored version to clear drift.
+  No outbound fetches — the identity is derived entirely from local data.
 - **Mail-store layout detection:** nodary now probes `~/Library/Mail/` for
   known Apple Mail layout directories (V10, V9, V8, V7, V6) and validates
   the store before syncing or switching sources. Only V10 is verified

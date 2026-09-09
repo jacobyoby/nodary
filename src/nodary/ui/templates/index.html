@@ -360,8 +360,12 @@ async function loadStatus() {
   const dupeNote = dupes > 0 ? ` · ${dupes} dupes hidden` : "";
   document.getElementById("stats").textContent =
     `${s.unique_incoming || s.incoming} unique incoming · ${s.senders} senders${dupeNote}`;
+  const warnings = [];
   if (s.encryption !== "sqlcipher")
-    document.getElementById("warn").textContent = "⚠ database not encrypted (sqlcipher not installed)";
+    warnings.push("⚠ database not encrypted (sqlcipher not installed)");
+  if (s.psl_drift)
+    warnings.push("⚠ Public Suffix List has changed since profiles were built. Scores may differ. Run nodary rebuild to update.");
+  document.getElementById("warn").textContent = warnings.join(" · ");
 
   // build status strip
   const strip = document.getElementById("status-strip");

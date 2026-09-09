@@ -286,11 +286,11 @@ def test_registry_has_all_migrations():
 def test_pending_migrations_filters_correctly():
     pending = get_pending_migrations(0)
     versions = [v for v, _, _ in pending]
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4]
 
     pending = get_pending_migrations(2)
     versions = [v for v, _, _ in pending]
-    assert versions == [3]
+    assert versions == [3, 4]
 
     pending = get_pending_migrations(LATEST_VERSION)
     assert pending == []
@@ -310,7 +310,7 @@ def test_pending_migrations_with_target():
 def test_run_migrations_applies_in_order():
     conn = _bare_conn()
     applied = run_migrations(conn)
-    assert applied == [1, 2, 3]
+    assert applied == [1, 2, 3, 4]
     assert get_current_version(conn) == LATEST_VERSION
     conn.close()
 
@@ -345,7 +345,7 @@ def test_failed_migration_rolls_back():
         }
         assert "_mig_fail_marker" not in tables
         # Migrations 2 and 3 succeeded before 99 failed.
-        assert get_current_version(conn) == 3
+        assert get_current_version(conn) == LATEST_VERSION
     finally:
         del _REGISTRY[99]
     conn.close()

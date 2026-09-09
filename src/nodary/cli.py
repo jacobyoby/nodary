@@ -209,9 +209,15 @@ def cmd_set_source(args) -> int:
 
 def cmd_rebuild(args) -> int:
     from .pipeline import rebuild
+    from .storage.psl import get_current_psl_identity
 
     conn = _open()
     n = rebuild(conn)
+    # Profiles were just rebuilt with the current PSL; record it so that
+    # future tldextract upgrades are detected as drift rather than
+    # silently shifting domain extraction.
+    storage_db.set_meta(conn, "psl_version", get_current_psl_identity())
+    conn.commit()
     print(f"rebuilt profiles, tiers, and scores from {n} messages")
     return 0
 
@@ -222,6 +228,17 @@ def cmd_status(args) -> int:
     conn = _open()
     encryption = storage_db.get_meta(conn, "encryption") or "unknown"
     print(f"engine v{ENGINE_VERSION} | db encryption: {encryption}")
+
+    # PSL version info
+    psl = storage_db.get_psl_drift_info(conn)
+    print(f"psl: {psl['current']} (stored: {psl['stored']})")
+    if psl["drift"]:
+        print(
+            "  ⚠ PSL has changed since profiles were built."
+            " Run `nodary rebuild` to update.",
+            file=sys.stderr,
+        )
+
     accounts = conn.execute("SELECT * FROM accounts ORDER BY id").fetchall()
     if not accounts:
         print("no accounts. run: nodary add-account")

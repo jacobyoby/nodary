@@ -14,7 +14,7 @@ from flask import Flask, jsonify, render_template, request
 from ..feature_extraction.profiles import load_snapshot
 from ..feature_extraction.records import HIST_HOURS, unpack_hist
 from ..scoring.tiers import TIER_LABELS, matching_tier_rule
-from ..storage import get_meta
+from ..storage import get_meta, get_psl_drift_info
 from . import tls as _tls
 
 # Shared projection for scored incoming rows. No subject, body, filename,
@@ -254,6 +254,8 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             acct_params,
         ).fetchone()[0]
 
+        psl = get_psl_drift_info(conn)
+
         return jsonify(
             {
                 "messages": counts["n"],
@@ -264,6 +266,9 @@ def create_app(conn: sqlite3.Connection) -> Flask:
                 "accounts": [dict(a) for a in accounts],
                 "total_skipped": total_skipped,
                 "has_errors": has_errors,
+                "psl_version": psl["current"],
+                "psl_stored_version": psl["stored"],
+                "psl_drift": psl["drift"],
             }
         )
 

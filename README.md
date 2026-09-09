@@ -110,6 +110,10 @@ one Gmail address, for example, must not establish trust in every Gmail sender.
 - Public Suffix List lookups use `tldextract`'s bundled snapshot with runtime
   fetching disabled; the freemail-domain list lives in
   `src/nodary/feature_extraction/normalize.py`. Nodary fetches neither at runtime.
+  The PSL snapshot identity (version + hash) is recorded in `schema_meta`;
+  when a `tldextract` upgrade changes the bundled list, `nodary status` and
+  the dashboard surface drift. Run `nodary rebuild` to update profiles with
+  the new suffix list.
 - The dashboard binds to `127.0.0.1` and its page has no outbound requests.
   It serves HTTPS via a locally-trusted mkcert certificate when available;
   certificate generation is fully local (no ACME, no Certificate
@@ -169,6 +173,10 @@ Recompute all derived profiles, tiers, and scores from locally stored facts:
 ```sh
 uv run nodary rebuild
 ```
+
+Run `nodary rebuild` after a `tldextract` upgrade to clear PSL drift. The
+`nodary status` command reports whether the bundled Public Suffix List has
+changed since profiles were last built; the dashboard shows a matching banner.
 
 Replay the bundled labeled calibration corpus through the real scoring pipeline
 and print score distributions, feature firing rates, and threshold separation:

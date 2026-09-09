@@ -19,7 +19,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 try:
     import sqlcipher3  # type: ignore
@@ -102,8 +102,28 @@ def connect(path: Path | str, key: str | None = None) -> sqlite3.Connection:
         (encryption,),
     )
     _set_meta_default(conn, "created_at", str(int(time.time())))
+
     conn.commit()
     return conn
+
+
+def get_psl_drift_info(conn: sqlite3.Connection) -> dict:
+    """Return PSL drift information for the given connection.
+
+    Returns a dict with keys:
+    - ``current``: identity of the currently bundled PSL snapshot
+    - ``stored``: identity recorded when profiles were last built
+    - ``drift``: ``True`` when the two differ
+    """
+    from .psl import get_current_psl_identity
+
+    current = get_current_psl_identity()
+    stored = get_meta(conn, "psl_version") or current
+    return {
+        "current": current,
+        "stored": stored,
+        "drift": stored != current,
+    }
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -126,6 +146,14 @@ def _set_meta_default(conn: sqlite3.Connection, key: str, value: str) -> None:
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM schema_meta WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else None
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO schema_meta (key, value) VALUES (?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
 
 
 def open_default() -> sqlite3.Connection:
