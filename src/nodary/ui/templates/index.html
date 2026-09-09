@@ -39,6 +39,15 @@
   header .stat { color: var(--dim); font-size: 13px; margin-left: auto; }
   #warn { flex-basis: 100%; color: var(--hot); font-size: 13px; }
 
+  /* account switcher */
+  .acct-switcher { max-width: 980px; margin: 0 auto; padding: 0 24px 8px;
+                    display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .acct-switcher label { color: var(--dim); }
+  .acct-switcher select { background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+    font: inherit; font-size: 13px; cursor: pointer; box-shadow: var(--shadow); }
+  .acct-switcher select:focus { border-color: var(--t3); outline: none; }
+
   .filters { display: flex; gap: 6px; flex-wrap: wrap; max-width: 980px;
              margin: 0 auto; padding: 0 24px 14px; }
   .filters button { background: var(--panel); color: var(--dim);
@@ -202,6 +211,10 @@
   <span class="stat num" id="stats">loading…</span>
   <span id="warn"></span>
 </header>
+<div class="acct-switcher" id="acct-switcher">
+  <label for="acct-select">Account:</label>
+  <select id="acct-select"><option value="all" selected>all accounts</option></select>
+</div>
 <div class="status-strip" id="status-strip"></div>
 <div class="filters" id="filters">
   <button data-tier="" class="on">all</button>
@@ -320,8 +333,29 @@ function fmtSyncTime(ts) {
   return Math.floor(diff / 86400) + "d ago";
 }
 
+// --- account switcher ---
+let currentAccount = "all";
+
+async function loadAccounts() {
+  const accts = await (await fetch("/api/accounts")).json();
+  const sel = document.getElementById("acct-select");
+  // keep "all" as first option, add per-account options
+  accts.forEach(a => {
+    const opt = document.createElement("option");
+    opt.value = a.id;
+    opt.textContent = a.email;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener("change", () => {
+    currentAccount = sel.value;
+    loadStatus();
+    loadMessages(tier);
+  });
+}
+
 async function loadStatus() {
-  const s = await (await fetch("/api/status")).json();
+  const s = await (await fetch(`/api/status?account=${currentAccount}`)).json();
+  if (s.error) return;  // account not found — ignore silently
   const dupes = s.incoming - (s.unique_incoming || s.incoming);
   const dupeNote = dupes > 0 ? ` · ${dupes} dupes hidden` : "";
   document.getElementById("stats").textContent =
@@ -353,8 +387,9 @@ async function loadStatus() {
 
   const acctPills = accts.map(a => {
     const synced = fmtSyncTime(a.last_synced_at);
+    const msgs = a.skip_count !== undefined ? ` · ${a.skip_count} skip` : "";
     const err = a.last_error ? ` <span class="acct-err">· ${esc(a.last_error)}</span>` : "";
-    return `<span class="acct-pill">${esc(a.email)} · ${synced}${err}</span>`;
+    return `<span class="acct-pill">${esc(a.email)} · ${synced}${msgs}${err}</span>`;
   }).join(" ");
 
   const skipLink = skipped > 0
@@ -368,7 +403,8 @@ async function loadStatus() {
 
 async function loadMessages(tier) {
   const q = tier === "" ? "" : `&tier=${tier}`;
-  const msgs = await (await fetch(`/api/messages?limit=300${q}`)).json();
+  const aq = currentAccount === "all" ? "" : `&account=${currentAccount}`;
+  const msgs = await (await fetch(`/api/messages?limit=300${q}${aq}`)).json();
   const list = document.getElementById("list");
   if (!msgs.length) { list.innerHTML = '<div class="empty">no scored messages — run <code>nodary sync</code></div>'; return; }
   list.innerHTML = msgs.map(m => {
@@ -544,6 +580,7 @@ document.addEventListener("keydown", e => {
 });
 window.addEventListener("hashchange", route);
 window.addEventListener("popstate", route);
+loadAccounts();
 loadStatus();
 loadMessages("").then(route);
 </script>

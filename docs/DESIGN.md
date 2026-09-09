@@ -55,6 +55,23 @@ The skip count links to a local-only overlay listing skipped messages via
 `/api/skipped`. The overlay shows account, folder name, UID, reason, and
 timestamp — no message bodies, subjects, or sender addresses.
 
+## Dashboard Account Filtering
+
+The dashboard supports viewing data for a single account or all accounts
+(default). An account switcher dropdown is populated from `/api/accounts`
+(id + email for every configured account, plus an "all accounts" option).
+Switching accounts updates the message list and status strip without a
+page reload.
+
+`/api/messages` and `/api/status` accept `?account=<id>` or `?account=all`
+(default). When filtered to a single account, the endpoints join through
+`folders.account_id` to restrict results. The account filter composes with
+existing tier and limit parameters. A nonexistent account id returns 404.
+
+When viewing all accounts, the status strip shows per-account pills with
+last sync time and skip count. When viewing a single account, only that
+account's pill is shown and all counts reflect only that account's data.
+
 ## Main Components
 
 - `cli.py` provides `add-account`, `set-secret`, `set-source`, `sync`,

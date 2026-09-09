@@ -331,3 +331,154 @@ def test_index_renders_skip_overlay(client):
     html = client.get("/").get_data(as_text=True)
     assert 'id="skip-overlay"' in html
     assert "/api/skipped" in html
+
+
+# ── account filter ────────────────────────────────────────────────────
+
+
+def _add_second_account(conn):
+    """Insert a second account + folder + identity, return (acct_id, folder_id)."""
+    conn.execute(
+        "INSERT INTO accounts (id, email, imap_host, auth_method, created_at)"
+        " VALUES (2, 'alice@other.com', 'imap.other', 'app_password', 0)"
+    )
+    conn.execute(
+        "INSERT INTO user_identities (account_id, email_norm) VALUES (2, 'alice@other.com')"
+    )
+    conn.execute(
+        "INSERT INTO folders (id, account_id, name, role) VALUES (3, 2, 'INBOX', 'inbox')"
+    )
+    conn.commit()
+    return 2, 3
+
+
+def _deliver_into_folder(conn, folder_id, uid, from_addr, direction="in"):
+    """Insert a minimal scored message directly into a folder (bypassing pipeline)."""
+    conn.execute(
+        "INSERT INTO senders (id, email_norm, domain, reg_domain,"
+        " reg_domain_skeleton, is_freemail, first_seen_at, last_seen_at)"
+        " VALUES ((SELECT COALESCE(MAX(id),0)+1 FROM senders), ?, 'x.com', 'x.com', 'x.com', 0, 0, 0)"
+        " ON CONFLICT(email_norm) DO NOTHING",
+        (from_addr,),
+    )
+    sender_id = conn.execute(
+        "SELECT id FROM senders WHERE email_norm = ?", (from_addr,)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO messages (folder_id, uid, message_id, direction, sender_id,"
+        " from_email_norm, sent_at, size_bytes)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, 100)",
+        (folder_id, uid, f"<test{uid}@x>", direction, sender_id, from_addr, 1700000000 + uid),
+    )
+    msg_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO message_scores (message_id, engine_version,"
+        " trust_tier_at_scoring, baseline_n, anomaly_score, scored_at)"
+        " VALUES (?, '1.0.0', 0, 1, 50.0, 0)",
+        (msg_id,),
+    )
+    conn.commit()
+    return msg_id
+
+
+def test_messages_account_filter_returns_only_that_account(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))  # account 1, folder 1
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")  # account 2, folder 3
+
+    msgs_acct1 = client.get("/api/messages?account=1").get_json()
+    addrs1 = {m["from_email_norm"] for m in msgs_acct1}
+    assert "cold@stranger.net" in addrs1
+    assert "other@x.com" not in addrs1
+
+    msgs_acct2 = client.get("/api/messages?account=2").get_json()
+    addrs2 = {m["from_email_norm"] for m in msgs_acct2}
+    assert "other@x.com" in addrs2
+    assert "cold@stranger.net" not in addrs2
+
+
+def test_messages_account_all_returns_all_accounts(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")
+
+    msgs = client.get("/api/messages?account=all").get_json()
+    addrs = {m["from_email_norm"] for m in msgs}
+    assert "cold@stranger.net" in addrs
+    assert "other@x.com" in addrs
+
+
+def test_messages_account_filter_composes_with_tier(client, conn, mailbox):
+    mailbox.establish_contact("dana@acme.com")  # tier 3, account 1
+    mailbox.deliver(make_email("cold@stranger.net"))  # tier 0, account 1
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")  # tier 0, account 2
+
+    # tier 0 + account 1: only cold@stranger.net
+    msgs = client.get("/api/messages?account=1&tier=0").get_json()
+    addrs = {m["from_email_norm"] for m in msgs}
+    assert addrs == {"cold@stranger.net"}
+
+    # tier 0 + account 2: only other@x.com
+    msgs2 = client.get("/api/messages?account=2&tier=0").get_json()
+    addrs2 = {m["from_email_norm"] for m in msgs2}
+    assert addrs2 == {"other@x.com"}
+
+
+def test_messages_account_not_found(client, conn):
+    r = client.get("/api/messages?account=999")
+    assert r.status_code == 404
+    assert "error" in r.get_json()
+
+
+def test_messages_account_invalid_id(client, conn):
+    r = client.get("/api/messages?account=abc")
+    assert r.status_code == 404
+
+
+def test_status_account_filter_returns_only_that_account(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))  # account 1
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")  # account 2
+
+    s1 = client.get("/api/status?account=1").get_json()
+    assert len(s1["accounts"]) == 1
+    assert s1["accounts"][0]["email"] == "jacob@myco.com"
+    assert s1["incoming"] == 1
+
+    s2 = client.get("/api/status?account=2").get_json()
+    assert len(s2["accounts"]) == 1
+    assert s2["accounts"][0]["email"] == "alice@other.com"
+    assert s2["incoming"] == 1
+
+
+def test_status_account_all_returns_all_accounts(client, conn, mailbox):
+    mailbox.deliver(make_email("cold@stranger.net"))
+    _add_second_account(conn)
+    _deliver_into_folder(conn, 3, 1, "other@x.com")
+
+    s = client.get("/api/status?account=all").get_json()
+    emails = {a["email"] for a in s["accounts"]}
+    assert emails == {"jacob@myco.com", "alice@other.com"}
+    assert s["incoming"] == 2
+
+
+def test_status_account_not_found(client, conn):
+    r = client.get("/api/status?account=999")
+    assert r.status_code == 404
+    assert "error" in r.get_json()
+
+
+def test_accounts_endpoint_lists_all(client, conn):
+    _add_second_account(conn)
+    accts = client.get("/api/accounts").get_json()
+    emails = {a["email"] for a in accts}
+    assert emails == {"jacob@myco.com", "alice@other.com"}
+    assert all("id" in a for a in accts)
+
+
+def test_index_renders_account_switcher(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="acct-switcher"' in html
+    assert 'id="acct-select"' in html
+    assert "/api/accounts" in html

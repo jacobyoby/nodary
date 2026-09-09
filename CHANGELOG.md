@@ -9,6 +9,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **Dashboard account filter:** account switcher dropdown on the dashboard
+  lets you view messages and status for a single account or all accounts
+  (default). `/api/messages` and `/api/status` accept `?account=<id>` or
+  `?account=all` (default). The filter composes with existing tier and
+  limit parameters. New `/api/accounts` endpoint lists configured accounts
+  for the switcher. Per-account message counts and last-sync times are
+  shown in the status strip when viewing all accounts.
 - **Machine migration:** `export-profile` and `import-profile` CLI commands
   for explicit, one-time transfer of the profile database between machines.
   Export writes a `.tar.gz` archive containing the database and a
