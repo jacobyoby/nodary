@@ -166,6 +166,13 @@ def cmd_sync(args) -> int:
     from .imap_sync import ImapTransport, sync_account
     from .pipeline import rebuild
 
+    sync_kwargs = {
+        "batch_size": args.batch_size,
+        "text_fetch_max_age_days": (
+            None if args.text_fetch_age_days == 0 else args.text_fetch_age_days
+        ),
+    }
+
     conn = _open()
     accounts = conn.execute("SELECT * FROM accounts").fetchall()
     if not accounts:
@@ -213,7 +220,7 @@ def cmd_sync(args) -> int:
                 continue
             claimed_uuids.add(uuid)
             transport = MailStoreTransport(mail_store, uuid)
-            stats = sync_account(conn, transport, acct["id"])
+            stats = sync_account(conn, transport, acct["id"], **sync_kwargs)
             if transport.skipped_transient:
                 print(
                     f"  warning: {transport.skipped_transient} indexed "
@@ -239,7 +246,7 @@ def cmd_sync(args) -> int:
                     _oauth2_login_with_refresh(transport, acct, secret)
                 else:
                     transport.login_password(acct["email"], secret)
-                stats = sync_account(conn, transport, acct["id"])
+                stats = sync_account(conn, transport, acct["id"], **sync_kwargs)
             except Exception as exc:
                 # Handle auth failures (login-time or mid-session) for
                 # OAuth2 accounts. Non-auth or non-OAuth2 errors propagate.
@@ -255,7 +262,7 @@ def cmd_sync(args) -> int:
                 if is_mid_session:
                     # Token expired mid-session: refresh and retry once.
                     if _try_refresh_and_relogin(transport, acct):
-                        stats = sync_account(conn, transport, acct["id"])
+                        stats = sync_account(conn, transport, acct["id"], **sync_kwargs)
                         # Success: fall through to normal output.
                     else:
                         msg = (
@@ -690,6 +697,19 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_set_secret)
 
     y = sub.add_parser("sync", help="incremental read-only sync + scoring")
+    y.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="number of UIDs to fetch per batch (default: 200)",
+    )
+    y.add_argument(
+        "--text-fetch-age-days",
+        type=int,
+        default=90,
+        help="skip text-part fetch for messages older than N days"
+        " (default: 90; use 0 to fetch all)",
+    )
     y.set_defaults(fn=cmd_sync)
 
     c = sub.add_parser(
