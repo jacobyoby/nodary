@@ -44,3 +44,11 @@
 - Comments explain constraints ("bounded because 100k mailboxes"), not
   mechanics.
 - SQL lives next to the code that owns it; no ORM.
+
+## Schema migrations
+
+Schema changes that cannot be expressed by `CREATE TABLE IF NOT EXISTS`
+(new columns, widened CHECK constraints, new indexes on existing columns)
+go in `src/nodary/storage/migrations/`. See the "Schema Migrations"
+section in `docs/DESIGN.md` for the full pattern. Every migration must
+be idempotent and have a test.

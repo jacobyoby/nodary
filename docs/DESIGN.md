@@ -170,6 +170,33 @@ Derived tables are caches over message facts. `pipeline.rebuild()` deletes the
 derived tables and replays all messages ordered by `(sent_at, id)` so profiles,
 tiers, and scores are regenerated deterministically.
 
+## Schema Migrations
+
+`schema.sql` is the authoritative base schema; `CREATE TABLE IF NOT EXISTS`
+ensures it is safe to re-run. Databases created by older versions may lack
+columns, indexes, or constraint changes that cannot be expressed by
+`IF NOT EXISTS` alone. These changes are applied by versioned migrations
+in `src/nodary/storage/migrations/`.
+
+`schema_meta.schema_version` tracks the highest migration applied. The
+migration runner (`run_migrations`) applies pending migrations in version
+order, each inside an explicit transaction. On failure the transaction is
+rolled back, the `PRAGMA foreign_keys` state is restored, and a clear
+error is raised — no partial state is left behind.
+
+### Adding a migration
+
+1. Create `src/nodary/storage/migrations/_NNN_short_name.py`.
+2. Decorate its `apply(conn)` function with
+   `@register_migration(version=NNN, name="short_name")`.
+3. Make `apply` **idempotent** — check whether the change already exists
+   before applying it (e.g. `CREATE INDEX IF NOT EXISTS`, or inspect
+   `PRAGMA table_info` before `ALTER TABLE`).
+4. Import the module in `src/nodary/storage/migrations/__init__.py`.
+5. Bump `LATEST_VERSION` in `__init__.py` to match `NNN`.
+6. Bump `SCHEMA_VERSION` in `db.py` to the same value.
+7. Add tests covering the migration and any rollback behaviour.
+
 ## Normalization
 
 - Addresses are lowercased, `+tag` is stripped, and Gmail-family local-part
