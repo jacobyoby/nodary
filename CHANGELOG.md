@@ -9,6 +9,9 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- README donate link for Jacobrakai Foundation
+  (`donate.stripe.com`, label: Donate / Support Jacobrakai Foundation —
+  JACOBRAKAI FOUNDATION 501(c)(3)).
 - README notes Jacobrakai Foundation 501(c)(3) status (EIN 33-3382083) and
   IRS Letter 947 dated September 3, 2026.
 - Privacy-invariant regression tests (`tests/test_privacy_invariants.py`) and
