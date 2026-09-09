@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from . import register_migration
 from ..psl import get_current_psl_identity
+from . import register_migration
 
 
 @register_migration(version=4, name="add_psl_version_to_schema_meta")

@@ -106,8 +106,7 @@ def main() -> None:
     source = generate_module(mapping, version)
     OUTPUT_FILE.write_text(source, encoding="utf-8")
     print(
-        f"Wrote {len(mapping)} confusable mappings to {OUTPUT_FILE} "
-        f"(Unicode {version})"
+        f"Wrote {len(mapping)} confusable mappings to {OUTPUT_FILE} (Unicode {version})"
     )
 
 

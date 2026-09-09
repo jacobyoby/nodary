@@ -11,16 +11,12 @@ Covers:
 from __future__ import annotations
 
 import socket
-import unicodedata
-
-import pytest
 
 from nodary.feature_extraction.normalize import (
     _CONFUSABLES,
     _CONFUSABLES_CURATED,
     skeleton,
 )
-
 
 # ------------------------------------------------------------------ loading --
 

@@ -245,7 +245,14 @@ def test_status_accounts_per_account_shape(client, conn):
     r = client.get("/api/status").get_json()
     assert len(r["accounts"]) == 1  # conftest creates one account
     a = r["accounts"][0]
-    assert {"id", "email", "auth_method", "last_error", "last_synced_at", "skip_count"} <= set(a)
+    assert {
+        "id",
+        "email",
+        "auth_method",
+        "last_error",
+        "last_synced_at",
+        "skip_count",
+    } <= set(a)
     assert a["email"] == "jacob@myco.com"
     assert a["last_synced_at"] is None  # no sync yet
 
@@ -253,18 +260,18 @@ def test_status_accounts_per_account_shape(client, conn):
 def test_status_skip_count_reflects_skipped_messages(client, conn):
     now = int(time.time())
     conn.execute(
-        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
-        " VALUES (1, 1, 100, 'missing_emlx', ?)",
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 100, 'missing_emlx', ?)",
         (now,),
     )
     conn.execute(
-        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
-        " VALUES (1, 1, 101, 'missing_emlx', ?)",
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 101, 'missing_emlx', ?)",
         (now,),
     )
     conn.execute(
-        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
-        " VALUES (1, 1, 102, 'unparseable_header', ?)",
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 102, 'unparseable_header', ?)",
         (now,),
     )
     conn.commit()
@@ -274,7 +281,9 @@ def test_status_skip_count_reflects_skipped_messages(client, conn):
 
 
 def test_status_last_error_surfaces(client, conn):
-    conn.execute("UPDATE accounts SET last_error = ? WHERE id = 1", ("missing credential",))
+    conn.execute(
+        "UPDATE accounts SET last_error = ? WHERE id = 1", ("missing credential",)
+    )
     conn.commit()
     r = client.get("/api/status").get_json()
     assert r["has_errors"] is True
@@ -295,8 +304,8 @@ def test_status_last_synced_at_derived_from_folders(client, conn):
 def test_skipped_endpoint_returns_rows(client, conn):
     now = int(time.time())
     conn.execute(
-        "INSERT INTO skipped_messages (account_id, folder_id, uid, reason, skipped_at)"
-        " VALUES (1, 1, 200, 'missing_emlx', ?)",
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 200, 'missing_emlx', ?)",
         (now,),
     )
     conn.commit()
@@ -368,7 +377,15 @@ def _deliver_into_folder(conn, folder_id, uid, from_addr, direction="in"):
         "INSERT INTO messages (folder_id, uid, message_id, direction, sender_id,"
         " from_email_norm, sent_at, size_bytes)"
         " VALUES (?, ?, ?, ?, ?, ?, ?, 100)",
-        (folder_id, uid, f"<test{uid}@x>", direction, sender_id, from_addr, 1700000000 + uid),
+        (
+            folder_id,
+            uid,
+            f"<test{uid}@x>",
+            direction,
+            sender_id,
+            from_addr,
+            1700000000 + uid,
+        ),
     )
     msg_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.execute(

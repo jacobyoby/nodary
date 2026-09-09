@@ -261,13 +261,13 @@ def _create_v1_db(path):
           PRIMARY KEY (message_id, feature)
         );
         CREATE TABLE IF NOT EXISTS skipped_messages (
-          id          INTEGER PRIMARY KEY,
-          account_id  INTEGER NOT NULL REFERENCES accounts(id),
-          folder_id   INTEGER NOT NULL REFERENCES folders(id),
-          uid         INTEGER NOT NULL,
-          reason      TEXT NOT NULL,
-          skipped_at  INTEGER NOT NULL,
-          UNIQUE (folder_id, uid, reason)
+          id         INTEGER PRIMARY KEY,
+          folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+          uid        INTEGER NOT NULL,
+          path       TEXT,
+          reason     TEXT NOT NULL,
+          skipped_at INTEGER NOT NULL,
+          UNIQUE (folder_id, uid)
         );
         """
     )

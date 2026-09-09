@@ -224,9 +224,9 @@ def test_set_source_mail_store_fails_on_bad_layout(env, monkeypatch, capsys, tmp
     # the account must NOT have been switched to mail_store
     from nodary.cli import _open
 
-    method = _open().execute(
-        "SELECT auth_method FROM accounts WHERE id = 1"
-    ).fetchone()[0]
+    method = (
+        _open().execute("SELECT auth_method FROM accounts WHERE id = 1").fetchone()[0]
+    )
     assert method != "mail_store"
 
 

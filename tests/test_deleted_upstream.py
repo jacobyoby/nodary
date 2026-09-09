@@ -7,13 +7,11 @@ only and does not exclude facts from scoring baselines.
 
 from __future__ import annotations
 
-import pytest
-from conftest import Mailbox, make_email
+from conftest import make_email
 
 from nodary.imap_sync.sync import reconcile_deleted_uids
 from nodary.pipeline import rebuild
 from nodary.ui import create_app
-
 
 # ── reconciliation logic ──────────────────────────────────────────────
 
@@ -46,14 +44,20 @@ def test_reconcile_clears_mark_on_reappearance(conn, mailbox):
         mailbox.deliver(make_email(f"sender{i}@example.com"))
     reconcile_deleted_uids(conn, account_id=1, folder_id=1, server_uids={1, 3})
     # Confirm UID 2 was marked.
-    assert conn.execute(
-        "SELECT deleted_upstream FROM messages WHERE folder_id=1 AND uid=2"
-    ).fetchone()["deleted_upstream"] == 1
+    assert (
+        conn.execute(
+            "SELECT deleted_upstream FROM messages WHERE folder_id=1 AND uid=2"
+        ).fetchone()["deleted_upstream"]
+        == 1
+    )
     # Now UID 2 reappears on the server.
     reconcile_deleted_uids(conn, account_id=1, folder_id=1, server_uids={1, 2, 3})
-    assert conn.execute(
-        "SELECT deleted_upstream FROM messages WHERE folder_id=1 AND uid=2"
-    ).fetchone()["deleted_upstream"] == 0
+    assert (
+        conn.execute(
+            "SELECT deleted_upstream FROM messages WHERE folder_id=1 AND uid=2"
+        ).fetchone()["deleted_upstream"]
+        == 0
+    )
 
 
 def test_reconcile_no_op_when_sets_match(conn, mailbox):
@@ -72,9 +76,13 @@ def test_reconcile_does_not_delete_rows(conn, mailbox):
     """Reconciliation must never remove message rows."""
     for i in range(3):
         mailbox.deliver(make_email(f"sender{i}@example.com"))
-    n_before = conn.execute("SELECT COUNT(*) FROM messages WHERE folder_id=1").fetchone()[0]
+    n_before = conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE folder_id=1"
+    ).fetchone()[0]
     reconcile_deleted_uids(conn, account_id=1, folder_id=1, server_uids=set())
-    n_after = conn.execute("SELECT COUNT(*) FROM messages WHERE folder_id=1").fetchone()[0]
+    n_after = conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE folder_id=1"
+    ).fetchone()[0]
     assert n_before == n_after == 3
 
 
@@ -369,10 +377,10 @@ def test_migration_005_adds_deleted_upstream_column(tmp_path):
         );
         CREATE TABLE skipped_messages (
           id INTEGER PRIMARY KEY,
-          account_id INTEGER NOT NULL REFERENCES accounts(id),
-          folder_id INTEGER NOT NULL REFERENCES folders(id),
-          uid INTEGER NOT NULL, reason TEXT NOT NULL, skipped_at INTEGER NOT NULL,
-          UNIQUE (folder_id, uid, reason)
+          folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+          uid INTEGER NOT NULL, path TEXT, reason TEXT NOT NULL,
+          skipped_at INTEGER NOT NULL,
+          UNIQUE (folder_id, uid)
         );
         """
     )
@@ -380,9 +388,7 @@ def test_migration_005_adds_deleted_upstream_column(tmp_path):
 
     # Open with connect() — migrations should run.
     c = storage_db.connect(path)
-    cols = {
-        r["name"] for r in c.execute("PRAGMA table_info(messages)").fetchall()
-    }
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(messages)").fetchall()}
     assert "deleted_upstream" in cols
     assert storage_db.get_meta(c, "schema_version") == str(LATEST_VERSION)
     c.close()

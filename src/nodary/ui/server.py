@@ -173,9 +173,7 @@ def _sender_detail(conn: sqlite3.Connection, sender_id: int) -> dict | None:
     }
 
 
-def _account_filter_sql(
-    conn: sqlite3.Connection, acct: str
-) -> tuple[str | None, list]:
+def _account_filter_sql(conn: sqlite3.Connection, acct: str) -> tuple[str | None, list]:
     """Return (WHERE fragment, params) for an account filter.
 
     Returns (None, []) when the account id is not found.
@@ -187,9 +185,7 @@ def _account_filter_sql(
         acct_id = int(acct)
     except ValueError:
         return None, []
-    row = conn.execute(
-        "SELECT 1 FROM accounts WHERE id = ?", (acct_id,)
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM accounts WHERE id = ?", (acct_id,)).fetchone()
     if row is None:
         return None, []
     return "AND a.id = ?", [acct_id]
@@ -233,7 +229,8 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             f"""SELECT a.id, a.email, a.auth_method, a.last_error,
                       MAX(f.last_synced_at) AS last_synced_at,
                       (SELECT COUNT(*) FROM skipped_messages sk
-                         WHERE sk.account_id = a.id) AS skip_count
+                         JOIN folders sf ON sf.id = sk.folder_id
+                         WHERE sf.account_id = a.id) AS skip_count
                FROM accounts a
                LEFT JOIN folders f ON f.account_id = a.id
                WHERE 1=1 {acct_where}
@@ -296,11 +293,11 @@ def create_app(conn: sqlite3.Connection) -> Flask:
     def skipped():
         """Skip list: folder, rowid/UID, reason — no message content."""
         rows = conn.execute(
-            """SELECT sk.id, sk.account_id, sk.uid, sk.reason, sk.skipped_at,
+            """SELECT sk.id, f.account_id, sk.uid, sk.reason, sk.skipped_at,
                       f.name AS folder_name, a.email AS account_email
                FROM skipped_messages sk
                JOIN folders f ON f.id = sk.folder_id
-               JOIN accounts a ON a.id = sk.account_id
+               JOIN accounts a ON a.id = f.account_id
                ORDER BY sk.skipped_at DESC, sk.id DESC
                LIMIT 500"""
         ).fetchall()
@@ -358,9 +355,7 @@ def create_app(conn: sqlite3.Connection) -> Flask:
     @app.get("/api/accounts")
     def accounts():
         """List all configured accounts (id + email) for the switcher."""
-        rows = conn.execute(
-            "SELECT id, email FROM accounts ORDER BY id"
-        ).fetchall()
+        rows = conn.execute("SELECT id, email FROM accounts ORDER BY id").fetchall()
         return jsonify([dict(r) for r in rows])
 
     @app.get("/api/senders/<int:sender_id>")

@@ -254,9 +254,7 @@ def sync_folder(
     # new_uids(0) returns all server UIDs (UID > 0), cheap for both IMAP
     # (one SEARCH) and the mail store (one SQL query).
     all_server_uids = set(transport.new_uids(0))
-    n_deleted = reconcile_deleted_uids(
-        conn, account_id, folder_id, all_server_uids
-    )
+    n_deleted = reconcile_deleted_uids(conn, account_id, folder_id, all_server_uids)
     if n_deleted:
         conn.commit()
     stats.server_deleted += n_deleted

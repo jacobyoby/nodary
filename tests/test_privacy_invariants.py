@@ -249,6 +249,7 @@ def test_sync_persists_structure_not_content(tmp_path):
     assert forbidden == set()
     _assert_no_snippets(json.dumps(payload), "/api JSON")
 
+    conn.commit()
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
     _assert_no_snippets(

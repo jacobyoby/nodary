@@ -99,7 +99,7 @@ class TestImportProfile:
         assert Path(target).exists()
 
         # Verify the restored DB is valid
-        conn = storage_db.connect(target)
+        conn = storage_db.connect(target, KEY)
         row = conn.execute("SELECT email FROM accounts").fetchone()
         assert row["email"] == "jacob@example.com"
         conn.close()
@@ -150,7 +150,7 @@ class TestImportProfile:
             == 0
         )
         # Should now be a valid DB, not the original text
-        conn = storage_db.connect(target)
+        conn = storage_db.connect(target, KEY)
         assert conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 1
         conn.close()
 
@@ -289,7 +289,7 @@ class TestRoundTrip:
         target = str(env / "restored.db")
         assert main(["import-profile", "--input", archive, "--target-db", target]) == 0
 
-        restored = storage_db.connect(target)
+        restored = storage_db.connect(target, KEY)
         assert (
             restored.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == msg_count
         )
@@ -309,7 +309,7 @@ class TestRoundTrip:
         target = str(env / "restored.db")
         assert main(["import-profile", "--input", archive, "--target-db", target]) == 0
 
-        restored = storage_db.connect(target)
+        restored = storage_db.connect(target, KEY)
         acct = restored.execute("SELECT * FROM accounts").fetchone()
         assert acct["email"] == "jacob@example.com"
         assert acct["imap_host"] == "imap.example.com"

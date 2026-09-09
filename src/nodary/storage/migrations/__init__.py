@@ -107,9 +107,7 @@ def run_migrations(
             applied.append(version)
         except Exception:
             conn.execute("ROLLBACK")
-            raise RuntimeError(
-                f"migration {version} ({name}) failed"
-            ) from None
+            raise RuntimeError(f"migration {version} ({name}) failed") from None
         finally:
             # Restore FK pragma regardless of outcome.
             if fk_was_on:

@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS folders (
 
 -- Permanent mail-store fetch failures (corrupt / unparseable .emlx).
 -- Transient gaps are not stored: those retry from last_seen_uid.
--- path/reason only — no message content.
+-- path/reason only — no message content. Scope to an account via
+-- JOIN folders (folders.account_id); do not denormalize account_id here.
 CREATE TABLE IF NOT EXISTS skipped_messages (
   id         INTEGER PRIMARY KEY,
   folder_id  INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
@@ -211,17 +212,3 @@ CREATE TABLE IF NOT EXISTS message_score_features (
   explanation  TEXT NOT NULL,
   PRIMARY KEY (message_id, feature)
 );
-
--- Messages permanently skipped during sync (e.g. unparseable .emlx,
--- missing transport data). No message content is stored — only the
--- folder, UID, and a short machine-readable reason.
-CREATE TABLE IF NOT EXISTS skipped_messages (
-  id          INTEGER PRIMARY KEY,
-  account_id  INTEGER NOT NULL REFERENCES accounts(id),
-  folder_id   INTEGER NOT NULL REFERENCES folders(id),
-  uid         INTEGER NOT NULL,
-  reason      TEXT NOT NULL,
-  skipped_at  INTEGER NOT NULL,
-  UNIQUE (folder_id, uid, reason)
-);
-CREATE INDEX IF NOT EXISTS idx_skipped_account ON skipped_messages(account_id);

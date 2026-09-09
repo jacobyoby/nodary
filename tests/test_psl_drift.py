@@ -7,7 +7,6 @@ import re
 from nodary.storage import db as storage_db
 from nodary.storage.psl import get_current_psl_identity
 
-
 # ---------------------------------------------------------------------------
 # get_current_psl_identity()
 # ---------------------------------------------------------------------------
