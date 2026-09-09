@@ -148,6 +148,8 @@ def cmd_sync(args) -> int:
             finally:
                 transport.logout()
         print(f"{acct['email']}: {stats.new_messages} new messages")
+        if stats.server_deleted:
+            print(f"  {stats.server_deleted} message(s) marked server-deleted")
         if stats.invalidated_folders:
             print(
                 f"  UIDVALIDITY changed, refetched: "
@@ -268,6 +270,20 @@ def cmd_status(args) -> int:
     ).fetchone()[0]
     n_senders = conn.execute("SELECT COUNT(*) FROM senders").fetchone()[0]
     print(f"messages: {n_msgs} ({n_in} incoming) | senders: {n_senders}")
+    # Server-deleted: locally retained but no longer on the server.
+    n_deleted = conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE deleted_upstream = 1"
+    ).fetchone()[0]
+    if n_deleted:
+        print(f"server-deleted (retained for baselines): {n_deleted}")
+        rows = conn.execute(
+            "SELECT f.name, COUNT(*) AS cnt"
+            " FROM messages m JOIN folders f ON f.id = m.folder_id"
+            " WHERE m.deleted_upstream = 1"
+            " GROUP BY f.name ORDER BY cnt DESC",
+        ).fetchall()
+        for r in rows:
+            print(f"  {r['name']}: {r['cnt']}")
     return 0
 
 

@@ -22,7 +22,7 @@ import sqlite3
 logger = logging.getLogger(__name__)
 
 # Highest migration version.  Bump when adding a new migration file.
-LATEST_VERSION = 4
+LATEST_VERSION = 5
 
 _REGISTRY: dict[int, tuple[str, callable]] = {}
 
@@ -129,4 +129,5 @@ from . import (  # noqa: E402, F401
     _002_auth_method_check,
     _003_noop_example,
     _004_psl_version,
+    _005_deleted_upstream,
 )

@@ -149,6 +149,11 @@ differentiate "no Mail at all" from "Mail exists but wrong version".
 7. A self-From message is outgoing only when it is in a sent folder or it is
    self-sent without a DMARC failure. A self-From message with DMARC fail is
    treated as incoming and scored.
+8. After each folder sync, reconciliation compares local UIDs against the
+   server's full UID set. Any local UID absent from the server is marked
+   `deleted_upstream = 1`; any previously marked UID that reappears is
+   un-marked. No rows are deleted or purged — the mark is informational and
+   does not exclude facts from scoring baselines.
 
 ## Storage Model
 
@@ -159,6 +164,10 @@ differentiate "no Mail at all" from "Mail exists but wrong version".
   `accounts.auth_method` allows `oauth2`, `app_password`, and `mail_store`.
 - Facts: `senders`, `threads`, `messages`, `message_attachments`,
   `message_link_domains`, and outgoing-only `message_recipients`.
+  `messages.deleted_upstream` is a mark-only flag (never purge): when a
+  message disappears from the server, the row is retained for behavioral
+  baselines but flagged so the UI can distinguish "never fetched" from
+  "deleted upstream".
 - Derived profiles: `sender_profiles`, `sender_display_names`,
   `sender_attachment_types`, `sender_link_domains`, `sender_replyto_addrs`,
   `thread_reply_credits`, and `domain_profiles`.

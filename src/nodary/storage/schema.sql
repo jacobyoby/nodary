@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS messages (
   auth_spf            TEXT,
   auth_dkim           TEXT,
   auth_dmarc          TEXT,
+  deleted_upstream    INTEGER NOT NULL DEFAULT 0,
   UNIQUE (folder_id, uid)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id, sent_at);

@@ -372,6 +372,7 @@ async function loadStatus() {
   const accts = s.accounts || [];
   const hasErrors = s.has_errors;
   const skipped = s.total_skipped || 0;
+  const serverDel = s.server_deleted_count || 0;
   const health = hasErrors ? "red" : (skipped > 0 ? "yellow" : "green");
 
   let summary = "";
@@ -379,6 +380,12 @@ async function loadStatus() {
     const skipParts = accts.filter(a => a.skip_count > 0)
       .map(a => `${a.skip_count} in ${esc(a.email)}`);
     summary += `<b>${skipped} permanently skipped</b> (${skipParts.join(", ")})`;
+  }
+  if (serverDel > 0) {
+    if (summary) summary += " · ";
+    const delFolders = (s.server_deleted_by_folder || [])
+      .map(d => `${d.count} in ${esc(d.folder)}`).join(", ");
+    summary += `<b>${serverDel} server-deleted</b> (retained: ${delFolders})`;
   }
   const errAccts = accts.filter(a => a.last_error);
   if (errAccts.length) {

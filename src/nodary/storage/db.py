@@ -19,7 +19,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 try:
     import sqlcipher3  # type: ignore

@@ -256,6 +256,22 @@ def create_app(conn: sqlite3.Connection) -> Flask:
 
         psl = get_psl_drift_info(conn)
 
+        # Server-deleted: locally retained but no longer on the server.
+        sd_total = conn.execute(
+            f"SELECT COUNT(*) FROM messages m"
+            f" JOIN folders f ON f.id = m.folder_id"
+            f" WHERE m.deleted_upstream = 1 {msg_where}",
+            acct_params,
+        ).fetchone()[0]
+        sd_by_folder = conn.execute(
+            f"SELECT f.name, COUNT(*) AS cnt"
+            f" FROM messages m"
+            f" JOIN folders f ON f.id = m.folder_id"
+            f" WHERE m.deleted_upstream = 1 {msg_where}"
+            f" GROUP BY f.name ORDER BY cnt DESC",
+            acct_params,
+        ).fetchall()
+
         return jsonify(
             {
                 "messages": counts["n"],
@@ -269,6 +285,10 @@ def create_app(conn: sqlite3.Connection) -> Flask:
                 "psl_version": psl["current"],
                 "psl_stored_version": psl["stored"],
                 "psl_drift": psl["drift"],
+                "server_deleted_count": sd_total,
+                "server_deleted_by_folder": [
+                    {"folder": r["name"], "count": r["cnt"]} for r in sd_by_folder
+                ],
             }
         )
 

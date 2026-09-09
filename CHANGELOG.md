@@ -9,6 +9,15 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 ## [Unreleased]
 
 ### Added
+- **Server-deleted UID reconciliation:** after each folder sync, nodary
+  compares local UIDs against the server's full UID set. Messages that
+  disappeared from the server are marked `deleted_upstream = 1` but never
+  purged — retained facts continue to contribute to behavioral baselines.
+  A previously marked UID that reappears is un-marked automatically.
+  `nodary status` reports per-folder server-deleted counts; the dashboard
+  shows the total in the sync-health status strip; `/api/status` exposes
+  `server_deleted_count` and `server_deleted_by_folder`. Migration 005
+  adds the `deleted_upstream` column.
 - **PSL snapshot version tracking:** the bundled Public Suffix List identity
   (`tldextract` version + SHA-256 of the snapshot) is recorded in
   `schema_meta` on first connect (migration 004). `connect()` detects drift
