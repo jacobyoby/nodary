@@ -2,9 +2,8 @@
 
 All rules are versioned constants — changing any of them bumps
 NORMALIZE_VERSION, which invalidates derived profiles (rebuild required).
-No network access: the Public Suffix List is tldextract's bundled snapshot;
-the confusables map is generated at build time from vendored UTS #39 data
-(data/uts39/confusables.txt) by scripts/generate_confusables.py.
+No network access: the Public Suffix List is tldextract's bundled snapshot,
+and the confusables map is a generated snapshot of pinned UTS #39 data.
 """
 
 from __future__ import annotations
@@ -13,7 +12,9 @@ import re
 import unicodedata
 from functools import lru_cache
 
-NORMALIZE_VERSION = 1
+from ..confusables_generated import CONFUSABLES_MAP as _CONFUSABLES_SNAPSHOT
+
+NORMALIZE_VERSION = 2
 
 # Domains whose reputation must never propagate to unrelated senders
 # (anyone can register a mailbox there). Vendored, versioned list.
@@ -98,10 +99,10 @@ FREEMAIL_DOMAINS = frozenset(
 # Providers where dots in the local part are insignificant.
 _DOT_INSENSITIVE = frozenset({"gmail.com", "googlemail.com"})
 
-# Curated homoglyph folding table — the original hand-audited subset.
-# Used as a fallback when the generated UTS #39 map is absent, and as
-# overrides on top of the generated map (preserving digit substitutions
-# and Latin-target mappings that UTS #39 expresses differently).
+# Homoglyph folding table: generated UTS #39 snapshot plus the historical
+# curated ASCII overlays. Curated keys win so digit substitutions and
+# Latin-target Cyrillic/Greek folds stay colliding with trusted ASCII
+# domains. Do not edit the snapshot by hand — see docs/DESIGN.md.
 _CONFUSABLES_CURATED: dict[str, str] = {
     # Cyrillic -> Latin
     "а": "a",
@@ -154,24 +155,8 @@ _CONFUSABLES_CURATED: dict[str, str] = {
     "ⅴ": "v",
 }
 
-
-def _load_confusables() -> dict[str, str]:
-    """Load the generated UTS #39 map with curated overrides on top.
-
-    Falls back to the curated subset alone if the generated module is
-    missing (e.g. the build script hasn't been run).  No network access.
-    """
-    try:
-        from nodary.confusables_generated import CONFUSABLES_MAP
-
-        merged = dict(CONFUSABLES_MAP)
-        merged.update(_CONFUSABLES_CURATED)
-        return merged
-    except ImportError:
-        return dict(_CONFUSABLES_CURATED)
-
-
-_CONFUSABLES = _load_confusables()
+_CONFUSABLES = dict(_CONFUSABLES_SNAPSHOT)
+_CONFUSABLES.update(_CONFUSABLES_CURATED)
 
 _WS_RE = re.compile(r"\s+")
 _URL_HOST_RE = re.compile(
@@ -202,7 +187,10 @@ def reg_domain(host: str) -> str:
 
 
 def skeleton(text: str) -> str:
-    """Homoglyph-folded form. Two strings that render alike collide here."""
+    """Homoglyph-folded form. Two strings that render alike collide here.
+
+    Uses only the vendored UTS #39 snapshot; never downloads Unicode data.
+    """
     out = []
     for ch in unicodedata.normalize("NFKD", text.lower()):
         if unicodedata.combining(ch):

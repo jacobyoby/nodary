@@ -71,13 +71,13 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   previous hardcoded `~/Library/Mail/V10` fallback.
 - **Expanded confusables coverage:** lookalike-domain detection now uses a
   confusables map generated from vendored Unicode UTS #39 data (Unicode
-  17.0.0, ~6 300 mappings) instead of the original ~40-entry curated
-  subset. The curated subset is retained as overrides (digit substitutions
-  3→e, 5→s, and Latin-target Cyrillic/Greek mappings that UTS #39
-  expresses differently) and as a fallback if the generated module is
-  missing. Build-time generation script: `scripts/generate_confusables.py`.
-  No network access at runtime. Engine version bumped to 1.1.0 (existing
-  stored scores are flagged as stale and recomputed on next rebuild).
+  17.0.0, SHA-256 in `data/uts39/SHA256SUMS`) instead of the original
+  ~40-entry curated subset. The curated subset is retained as overrides
+  (digit substitutions 3→e, 5→s, and Latin-target Cyrillic/Greek mappings
+  that UTS #39 expresses differently). Uppercase UTS sources are not
+  attached to lowercase letters (so I→l does not fold every Latin i).
+  Build-time script: `scripts/generate_confusables.py` (`--check` in CI).
+  No network access at runtime. Engine version 1.1.0.
 - **Dashboard account filter:** account switcher dropdown on the dashboard
   lets you view messages and status for a single account or all accounts
   (default). `/api/messages` and `/api/status` accept `?account=<id>` or

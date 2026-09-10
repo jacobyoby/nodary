@@ -30,6 +30,12 @@ def test_skeleton_folds_homoglyphs():
     )  # transposition is NOT a homoglyph
 
 
+def test_skeleton_folds_uts39_beyond_curated_subset():
+    # Armenian oh is in UTS #39 and was missing from the curated table.
+    assert skeleton("acme-cօrp.com") == skeleton("acme-corp.com")
+    assert skeleton("pɑypal.com") == skeleton("paypal.com")  # Latin alpha
+
+
 def test_osa_distance():
     assert osa_distance("acme-corp", "acme-corp") == 0
     assert osa_distance("acme-corp", "acme-c0rp") == 1

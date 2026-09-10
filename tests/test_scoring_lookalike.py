@@ -36,6 +36,38 @@ def test_homoglyph_domain_and_name_collision(mailbox):
     assert mailbox.score_of(row_id) >= 60
 
 
+def test_cyrillic_homoglyph_domain(mailbox):
+    _trusted_dana(mailbox)
+    row_id = mailbox.deliver(
+        make_email(
+            "dana.ito@аcme-corp.com",  # Cyrillic а
+            display="Dana Ito",
+            when=T0 + timedelta(days=40),
+        )
+    )
+    feats = mailbox.features_of(row_id)
+    assert "lookalike_domain" in feats
+    assert feats["lookalike_domain"]["raw_value"] == 1.0
+    assert "acme-corp.com" in feats["lookalike_domain"]["explanation"]
+    assert "display_name_collision" in feats
+
+
+def test_uts39_armenian_oh_lookalike_missed_by_old_subset(mailbox):
+    """Armenian օ → o is in UTS #39; the pre-generation curated table omitted it."""
+    _trusted_dana(mailbox)
+    row_id = mailbox.deliver(
+        make_email(
+            "dana.ito@acme-cօrp.com",
+            display="Dana Ito",
+            when=T0 + timedelta(days=40),
+        )
+    )
+    feats = mailbox.features_of(row_id)
+    assert "lookalike_domain" in feats
+    assert feats["lookalike_domain"]["raw_value"] == 1.0
+    assert "acme-corp.com" in feats["lookalike_domain"]["explanation"]
+
+
 def test_edit_distance_lookalike(mailbox):
     _trusted_dana(mailbox)
     row_id = mailbox.deliver(
