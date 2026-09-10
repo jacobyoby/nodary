@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from nodary.feature_extraction import _confusables_data as snapshot
+from nodary import confusables_generated as snapshot
 from nodary.feature_extraction.normalize import skeleton
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -37,12 +37,13 @@ def test_runtime_snapshot_is_pure_data():
     assert "urllib" not in text
     assert "http.client" not in text
     assert "requests" not in text
-    assert "CONFUSABLES:" in text
+    assert "CONFUSABLES_MAP:" in text
 
 
 def test_skeleton_uses_only_in_process_map():
-    # Equality is computed from the imported snapshot, not a Unicode download.
     assert skeleton("paypal.com") == skeleton("pаypal.com")
-    assert snapshot.CONFUSABLES["օ"] == "o"
-    assert snapshot.CONFUSABLES["0"] == "o"
-    assert snapshot.CONFUSABLES["m"] == "rn"
+    assert snapshot.CONFUSABLES_MAP["օ"] == "o"
+    assert snapshot.CONFUSABLES_MAP["0"] == "o"
+    assert snapshot.CONFUSABLES_MAP["m"] == "rn"
+    # Uppercase UTS I→l must not poison Latin i.
+    assert snapshot.CONFUSABLES_MAP.get("i", "i") == "i"

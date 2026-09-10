@@ -252,8 +252,16 @@ error is raised — no partial state is left behind.
   curated subset (digit substitutions and Latin-target Cyrillic/Greek
   mappings) that overrides the generated entries where they differ. The
   curated subset is also the fallback when the generated module is absent.
-  To regenerate after updating the vendored data:
-  `python scripts/generate_confusables.py`.
+  To regenerate after updating the vendored drop:
+  1. Replace `data/uts39/confusables.txt` with a versioned file from
+     `https://www.unicode.org/Public/<version>/security/` (never `latest/`).
+  2. Update `data/uts39/VERSION`, `data/uts39/SHA256SUMS`, and
+     `PINNED_VERSION` / `PINNED_SHA256` in `scripts/generate_confusables.py`.
+  3. Run `uv run python scripts/generate_confusables.py` (stdlib only; no
+     network). That overwrites `src/nodary/confusables_generated.py`.
+  4. Run `uv run python scripts/generate_confusables.py --check` and
+     `uv run pytest tests/test_confusables.py tests/test_confusables_generate.py tests/test_scoring_lookalike.py`.
+  5. Bump `NORMALIZE_VERSION` and `ENGINE_VERSION` if skeletons change.
 - Sender-local hour/day come from the UTC offset carried in the `Date` header,
   so behavioral baselines follow the sender's clock rather than the user's.
 - Authentication verdicts are parsed from the receiving server's

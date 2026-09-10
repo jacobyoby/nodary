@@ -12,7 +12,7 @@ import re
 import unicodedata
 from functools import lru_cache
 
-from ._confusables_data import CONFUSABLES as _CONFUSABLES_SNAPSHOT
+from ..confusables_generated import CONFUSABLES_MAP as _CONFUSABLES_SNAPSHOT
 
 NORMALIZE_VERSION = 2
 
@@ -99,10 +99,10 @@ FREEMAIL_DOMAINS = frozenset(
 # Providers where dots in the local part are insignificant.
 _DOT_INSENSITIVE = frozenset({"gmail.com", "googlemail.com"})
 
-# Homoglyph folding table: generated from vendored UTS #39 confusables.txt
-# plus the historical ASCII overlays in scripts/generate_confusables.py.
-# Applied after NFKD decomposition strips diacritics. Do not edit the
-# snapshot by hand — see docs/DESIGN.md (Normalization).
+# Homoglyph folding table: generated UTS #39 snapshot plus the historical
+# curated ASCII overlays. Curated keys win so digit substitutions and
+# Latin-target Cyrillic/Greek folds stay colliding with trusted ASCII
+# domains. Do not edit the snapshot by hand — see docs/DESIGN.md.
 _CONFUSABLES_CURATED: dict[str, str] = {
     # Cyrillic -> Latin
     "а": "a",

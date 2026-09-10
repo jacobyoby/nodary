@@ -29,8 +29,8 @@
 ## Workflow
 
 - Python 3.12+, `uv sync` to set up, `uv run pytest` must pass.
-- Confusables updates: pin a new UTS #39 drop under `third_party/unicode/uts39/`
-  and regenerate with `uv run python scripts/generate_confusables.py` (see
+- Confusables updates: pin a new UTS #39 drop under `data/uts39/` and
+  regenerate with `uv run python scripts/generate_confusables.py` (see
   `docs/DESIGN.md` Normalization). Do not fetch Unicode data at runtime.
 - Format & lint: `uv run ruff format . && uv run ruff check .` before pushing
   (config lives in `pyproject.toml`; CI treats warnings as errors).
