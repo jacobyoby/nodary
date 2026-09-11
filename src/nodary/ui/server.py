@@ -225,6 +225,8 @@ def create_app(conn: sqlite3.Connection) -> Flask:
 
         # Per-account sync health: last sync time (derived from folders),
         # permanent skip count, and last error (persisted on accounts).
+        # skipped_messages has no account_id — scope via JOIN folders.
+        # skip_count is independent of messages.deleted_upstream (#31).
         accounts = conn.execute(
             f"""SELECT a.id, a.email, a.auth_method, a.last_error,
                       MAX(f.last_synced_at) AS last_synced_at,
@@ -253,7 +255,8 @@ def create_app(conn: sqlite3.Connection) -> Flask:
 
         psl = get_psl_drift_info(conn)
 
-        # Server-deleted: locally retained but no longer on the server.
+        # Server-deleted (#31): locally retained, gone upstream. Separate
+        # from skipped_messages — do not fold these into skip_count.
         sd_total = conn.execute(
             f"SELECT COUNT(*) FROM messages m"
             f" JOIN folders f ON f.id = m.folder_id"
@@ -291,15 +294,25 @@ def create_app(conn: sqlite3.Connection) -> Flask:
 
     @app.get("/api/skipped")
     def skipped():
-        """Skip list: folder, rowid/UID, reason — no message content."""
+        """Skip list: folder, rowid/UID, reason — no message content.
+
+        Account scope is JOIN folders → accounts. skipped_messages has
+        no account_id column. This list is not server-deleted messages.
+        """
+        acct = request.args.get("account", "all")
+        acct_where, acct_params = _account_filter_sql(conn, acct)
+        if acct_where is None:
+            return jsonify({"error": f"account {acct!r} not found"}), 404
         rows = conn.execute(
-            """SELECT sk.id, f.account_id, sk.uid, sk.reason, sk.skipped_at,
-                      f.name AS folder_name, a.email AS account_email
-               FROM skipped_messages sk
-               JOIN folders f ON f.id = sk.folder_id
-               JOIN accounts a ON a.id = f.account_id
-               ORDER BY sk.skipped_at DESC, sk.id DESC
-               LIMIT 500"""
+            f"""SELECT sk.id, f.account_id, sk.uid, sk.reason, sk.skipped_at,
+                       f.name AS folder_name, a.email AS account_email
+                FROM skipped_messages sk
+                JOIN folders f ON f.id = sk.folder_id
+                JOIN accounts a ON a.id = f.account_id
+                WHERE 1=1 {acct_where}
+                ORDER BY sk.skipped_at DESC, sk.id DESC
+                LIMIT 500""",
+            acct_params,
         ).fetchall()
         return jsonify([dict(r) for r in rows])
 
