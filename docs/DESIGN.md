@@ -49,12 +49,15 @@ Skip counts come from the `skipped_messages` table, which records folder,
 UID, reason, and timestamp for messages the sync layer could not ingest
 (e.g. missing `.emlx`, unparseable headers). No message content is stored.
 Last sync time is derived from `folders.last_synced_at` (MAX per account).
-Last error is a persisted string on `accounts.last_error`, written by the
-sync layer when an account-level failure occurs (e.g. missing credential).
+Last error is a **persisted** (not derived) string on `accounts.last_error`,
+written by the CLI on account-level failure (missing credential, unclaimed
+mail-store, OAuth2 auth failure) and cleared on the next successful sync of
+that account. The string is a short reason — never a message body.
 
 The skip count links to a local-only overlay listing skipped messages via
-`/api/skipped`. The overlay shows account, folder name, UID, reason, and
-timestamp — no message bodies, subjects, or sender addresses.
+`/api/skipped` (honors `?account=`). The overlay shows account, folder name,
+UID/rowid, reason, and timestamp — no message bodies, subjects, or sender
+addresses.
 
 ## Dashboard Account Filtering
 
@@ -268,7 +271,9 @@ used to measure performance on your hardware:
   `thread_reply_credits`, and `domain_profiles`.
 - Scores: `message_scores` and `message_score_features`.
 - Sync health: `skipped_messages` (permanently skipped messages with
-  folder, UID, and reason; no message content).
+  folder, UID/rowid, and reason; no message content) and
+  `accounts.last_error` (persisted account-level failure; cleared on
+  the next successful sync).
 
 Derived tables are caches over message facts. `pipeline.rebuild()` deletes the
 derived tables and replays all messages ordered by `(sent_at, id)` so profiles,

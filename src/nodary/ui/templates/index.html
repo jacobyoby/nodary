@@ -377,9 +377,11 @@ async function loadStatus() {
 
   let summary = "";
   if (skipped > 0) {
-    const skipParts = accts.filter(a => a.skip_count > 0)
-      .map(a => `${a.skip_count} in ${esc(a.email)}`);
-    summary += `<b>${skipped} permanently skipped</b> (${skipParts.join(", ")})`;
+    const skipAccts = accts.filter(a => a.skip_count > 0);
+    const mailStore = skipAccts.every(a => a.auth_method === "mail_store");
+    const where = mailStore ? " in mail-store" : "";
+    const skipParts = skipAccts.map(a => `${a.skip_count} in ${esc(a.email)}`);
+    summary += `<b>${skipped} permanently skipped${where}</b> (${skipParts.join(", ")})`;
   }
   if (serverDel > 0) {
     if (summary) summary += " · ";
@@ -391,7 +393,7 @@ async function loadStatus() {
   if (errAccts.length) {
     if (summary) summary += " · ";
     summary += errAccts.map(a =>
-      `<b class="acct-err">${esc(a.email)}: ${esc(a.last_error)}</b>`
+      `<b class="acct-err">account ${a.id}: ${esc(a.last_error)}</b>`
     ).join(", ");
   }
   if (!summary) summary = "<b>sync healthy</b>";
@@ -553,13 +555,13 @@ async function openSkipList() {
   const body = document.getElementById("skip-body");
   body.innerHTML = '<div class="skip-empty">loading…</div>';
   try {
-    const rows = await (await fetch("/api/skipped")).json();
+    const rows = await (await fetch(`/api/skipped?account=${currentAccount}`)).json();
     if (!rows.length) {
       body.innerHTML = '<div class="skip-empty">no skipped messages</div>';
       return;
     }
     body.innerHTML = `<table class="skip-table"><thead><tr>` +
-      `<th>Account</th><th>Folder</th><th>UID</th><th>Reason</th><th>Skipped</th>` +
+      `<th>Account</th><th>Folder</th><th>UID / rowid</th><th>Reason</th><th>Skipped</th>` +
       `</tr></thead><tbody>` +
       rows.map(r => `<tr>` +
         `<td>${esc(r.account_email)}</td>` +

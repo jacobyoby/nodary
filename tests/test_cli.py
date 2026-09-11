@@ -172,8 +172,15 @@ def test_shared_alias_cannot_bind_two_accounts_to_one_store(
     assert "no unclaimed account" in err
     from nodary.cli import _open
 
-    n = _open().execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    conn = _open()
+    n = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert n == 2  # only account 1's messages, ingested once
+    by_id = {
+        r["id"]: r["last_error"]
+        for r in conn.execute("SELECT id, last_error FROM accounts")
+    }
+    assert by_id[1] is None
+    assert "no unclaimed account" in by_id[2]
 
 
 def test_sync_continues_after_first_account_missing_credential(
@@ -195,8 +202,34 @@ def test_sync_continues_after_first_account_missing_credential(
     assert "2 new messages" in captured.out
     from nodary.cli import _open
 
-    n = _open().execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    conn = _open()
+    n = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert n == 2
+    by_id = {
+        r["id"]: r["last_error"]
+        for r in conn.execute("SELECT id, last_error FROM accounts")
+    }
+    assert by_id[1] == "no credential; run nodary set-secret"
+    assert by_id[2] is None
+
+
+def test_successful_sync_clears_last_error(env, monkeypatch, store):  # noqa: F811
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(store.root))
+    assert _add_account(monkeypatch) == 0
+    assert main(["set-source", "1", "mail-store"]) == 0
+    from nodary.cli import _open
+
+    conn = _open()
+    conn.execute(
+        "UPDATE accounts SET last_error = ? WHERE id = 1",
+        ("stale missing credential",),
+    )
+    conn.commit()
+    assert main(["sync"]) == 0
+    assert (
+        _open().execute("SELECT last_error FROM accounts WHERE id = 1").fetchone()[0]
+        is None
+    )
 
 
 def test_add_account_aborted_prompt_does_not_write_row(env, monkeypatch, capsys):

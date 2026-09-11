@@ -8,6 +8,14 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Dashboard last_error contract:** account-level sync failures (missing
+  credential, unclaimed mail-store, OAuth2 auth failure) now persist
+  `accounts.last_error` so `/api/status` and the status strip match the CLI.
+  A successful sync of that account clears the field. `/api/skipped` honors
+  the dashboard account filter. Skip-list overlay labels the identifier as
+  UID/rowid and still omits message content.
+
 ### Changed
 - **Docs:** DESIGN.md, README, and TODO.md spell out the multi-mailbox vs
   multi-user boundary. One database is one operator's mail universe.

@@ -280,6 +280,35 @@ def test_status_skip_count_reflects_skipped_messages(client, conn):
     assert r["accounts"][0]["skip_count"] == 3
 
 
+def test_status_skip_count_isolated_per_account(client, conn):
+    now = int(time.time())
+    _add_second_account(conn)
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 100, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (3, 200, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (3, 201, 'unparseable_header', ?)",
+        (now,),
+    )
+    conn.commit()
+    s1 = client.get("/api/status?account=1").get_json()
+    s2 = client.get("/api/status?account=2").get_json()
+    sall = client.get("/api/status?account=all").get_json()
+    assert s1["total_skipped"] == 1
+    assert s1["accounts"][0]["skip_count"] == 1
+    assert s2["total_skipped"] == 2
+    assert s2["accounts"][0]["skip_count"] == 2
+    assert sall["total_skipped"] == 3
+
+
 def test_status_last_error_surfaces(client, conn):
     conn.execute(
         "UPDATE accounts SET last_error = ? WHERE id = 1", ("missing credential",)
@@ -326,6 +355,29 @@ def test_skipped_endpoint_empty(client):
     assert rows == []
 
 
+def test_skipped_endpoint_account_filter(client, conn):
+    now = int(time.time())
+    _add_second_account(conn)
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 200, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (3, 201, 'unparseable_header', ?)",
+        (now,),
+    )
+    conn.commit()
+    only1 = client.get("/api/skipped?account=1").get_json()
+    only2 = client.get("/api/skipped?account=2").get_json()
+    both = client.get("/api/skipped?account=all").get_json()
+    assert {r["uid"] for r in only1} == {200}
+    assert {r["uid"] for r in only2} == {201}
+    assert {r["uid"] for r in both} == {200, 201}
+    assert client.get("/api/skipped?account=999").status_code == 404
+
+
 # ── dashboard renders status strip ───────────────────────────────────
 
 
@@ -339,7 +391,10 @@ def test_index_renders_status_strip(client):
 def test_index_renders_skip_overlay(client):
     html = client.get("/").get_data(as_text=True)
     assert 'id="skip-overlay"' in html
-    assert "/api/skipped" in html
+    assert "/api/skipped?account=" in html
+    assert "UID / rowid" in html
+    assert "account ${a.id}" in html
+    assert "permanently skipped" in html
 
 
 # ── account filter ────────────────────────────────────────────────────

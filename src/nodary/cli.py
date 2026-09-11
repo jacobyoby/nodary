@@ -23,8 +23,23 @@ def _open():
     return storage_db.connect(storage_db.default_db_path(), get_or_create_db_key())
 
 
-def _account_error(acct, reason: str) -> None:
+def _account_error(conn, acct, reason: str) -> None:
+    """Print a per-account failure and persist it for the dashboard.
+
+    last_error is the persisted (not derived) string surfaced by /api/status.
+    It is cleared on the next successful sync of that account.
+    """
     print(f"account #{acct['id']} ({acct['email']}): {reason}", file=sys.stderr)
+    conn.execute(
+        "UPDATE accounts SET last_error = ? WHERE id = ?",
+        (reason, acct["id"]),
+    )
+    conn.commit()
+
+
+def _clear_account_error(conn, account_id: int) -> None:
+    conn.execute("UPDATE accounts SET last_error = NULL WHERE id = ?", (account_id,))
+    conn.commit()
 
 
 def cmd_add_account(args) -> int:
@@ -213,6 +228,7 @@ def cmd_sync(args) -> int:
             )
             if uuid is None:
                 _account_error(
+                    conn,
                     acct,
                     "no unclaimed account found in the local Apple Mail store",
                 )
@@ -237,7 +253,7 @@ def cmd_sync(args) -> int:
         else:
             secret = get_account_secret(acct["id"])
             if not secret:
-                _account_error(acct, "no credential; run nodary set-secret")
+                _account_error(conn, acct, "no credential; run nodary set-secret")
                 any_failed = True
                 continue
             transport = ImapTransport(acct["imap_host"], acct["imap_port"])
@@ -265,31 +281,21 @@ def cmd_sync(args) -> int:
                         stats = sync_account(conn, transport, acct["id"], **sync_kwargs)
                         # Success: fall through to normal output.
                     else:
-                        msg = (
-                            f"account #{acct['id']}: auth expired"
-                            f" mid-sync and refresh failed: {exc}"
+                        _account_error(
+                            conn,
+                            acct,
+                            f"auth expired mid-sync and refresh failed: {exc}",
                         )
-                        print(f"{acct['email']}: {msg}", file=sys.stderr)
-                        conn.execute(
-                            "UPDATE accounts SET last_error = ? WHERE id = ?",
-                            (msg, acct["id"]),
-                        )
-                        conn.commit()
                         any_failed = True
                         continue
                 else:
                     # Login failed and refresh also failed.
-                    msg = str(exc)
-                    print(f"{acct['email']}: {msg}", file=sys.stderr)
-                    conn.execute(
-                        "UPDATE accounts SET last_error = ? WHERE id = ?",
-                        (msg, acct["id"]),
-                    )
-                    conn.commit()
+                    _account_error(conn, acct, str(exc))
                     any_failed = True
                     continue
             finally:
                 transport.logout()
+        _clear_account_error(conn, acct["id"])
         print(f"{acct['email']}: {stats.new_messages} new messages")
         if stats.server_deleted:
             print(f"  {stats.server_deleted} message(s) marked server-deleted")
