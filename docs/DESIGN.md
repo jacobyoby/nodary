@@ -47,7 +47,13 @@ showing last sync time.
 
 Skip counts come from the `skipped_messages` table, which records folder,
 UID, reason, and timestamp for messages the sync layer could not ingest
-(e.g. missing `.emlx`, unparseable headers). No message content is stored.
+(e.g. missing `.emlx`, unparseable headers). The table has **no
+`account_id`** — account scope is always `JOIN folders` on `folder_id`
+(same pattern as #12 / #46). Permanent skips and `messages.deleted_upstream`
+(server-deleted, #31) are separate concepts: different `/api/status`
+fields (`total_skipped` vs `server_deleted_count`), shown **side by side**
+on the status strip, never summed or listed together. No message content
+is stored.
 Last sync time is derived from `folders.last_synced_at` (MAX per account).
 Last error is a **persisted** (not derived) string on `accounts.last_error`,
 written by the CLI on account-level failure (missing credential, unclaimed

@@ -345,14 +345,51 @@ def test_skipped_endpoint_returns_rows(client, conn):
     assert r["reason"] == "missing_emlx"
     assert r["folder_name"] == "INBOX"
     assert r["account_email"] == "jacob@myco.com"
-    # no message content in skip list
-    for key in ("body", "subject", "from_addr", "message_id"):
+    # no message content (or mail-store path) in skip list
+    for key in ("body", "subject", "from_addr", "message_id", "path"):
         assert key not in r
 
 
 def test_skipped_endpoint_empty(client):
     rows = client.get("/api/skipped").get_json()
     assert rows == []
+
+
+def test_skipped_messages_has_no_account_id(conn):
+    """#12/#46: scope skips via JOIN folders, never denormalize account_id."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(skipped_messages)")}
+    assert "account_id" not in cols
+    assert {"folder_id", "uid", "reason"} <= cols
+
+
+def test_status_skips_and_server_deleted_stay_separate(client, conn, mailbox):
+    """skipped_messages and deleted_upstream (#31) must not be mixed."""
+    mailbox.deliver(make_email("kept@example.com"))
+    mailbox.deliver(make_email("gone@example.com"))
+    conn.execute(
+        "UPDATE messages SET deleted_upstream = 1 WHERE from_email_norm = ?",
+        ("gone@example.com",),
+    )
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO skipped_messages (folder_id, uid, reason, skipped_at)"
+        " VALUES (1, 900, 'missing_emlx', ?)",
+        (now,),
+    )
+    conn.commit()
+    r = client.get("/api/status").get_json()
+    assert r["total_skipped"] == 1
+    assert r["server_deleted_count"] == 1
+    assert r["accounts"][0]["skip_count"] == 1
+    rows = client.get("/api/skipped").get_json()
+    assert [row["uid"] for row in rows] == [900]
+    blob = json.dumps({"status": r, "skipped": rows})
+    assert "gone@example.com" not in blob
+    assert "synthetic" not in blob
+    for row in rows:
+        assert "deleted_upstream" not in row
+        assert "body" not in row
+        assert "path" not in row
 
 
 def test_skipped_endpoint_account_filter(client, conn):
@@ -395,6 +432,9 @@ def test_index_renders_skip_overlay(client):
     assert "UID / rowid" in html
     assert "account ${a.id}" in html
     assert "permanently skipped" in html
+    # skip copy sits beside server-deleted; they are not one combined count
+    assert "server-deleted" in html
+    assert "server_deleted_count" in html
 
 
 # ── account filter ────────────────────────────────────────────────────
