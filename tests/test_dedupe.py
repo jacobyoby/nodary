@@ -63,3 +63,59 @@ def test_missing_message_id_is_never_treated_as_duplicate(mailbox):
     mailbox.deliver(bare())
     mailbox.deliver(bare())
     assert mailbox.conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
+
+
+def test_dedupe_partial_unique_index_exists(conn):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_messages_dedupe'"
+    ).fetchone()
+    assert row is not None
+    assert "WHERE message_id IS NOT NULL" in row["sql"]
+
+
+def test_raw_duplicate_insert_uses_index(conn, mailbox):
+    import sqlite3
+
+    from conftest import make_email
+
+    from nodary.feature_extraction.extract import record_from_message
+    from nodary.pipeline import ingest_message
+
+    msg = make_email("vendor2@example.com", message_id="<dup-index@example.com>")
+    rec = record_from_message(
+        msg, direction="in", my_addrs=frozenset({"jacob@myco.com"})
+    )
+    # first ingest via pipeline creates the constraint row
+    ingest_message(conn, 1, 999, rec)
+    # raw duplicate INSERT with same triple must violate unique index
+    try:
+        conn.execute(
+            "INSERT INTO messages (folder_id, uid, message_id, direction, sender_id, from_email_norm, sent_at, size_bytes) VALUES (1, 1000, ?, ?, 1, ?, ?, ?)",
+            (rec.message_id, "in", rec.from_email_norm, rec.sent_at, rec.size_bytes),
+        )
+        conn.commit()
+        raise AssertionError("expected IntegrityError")
+    except sqlite3.IntegrityError as e:
+        assert "idx_messages_dedupe" in str(e) or "UNIQUE constraint" in str(e)
+
+
+def test_pipeline_handles_integrity_error_race(conn, mailbox):
+    from conftest import make_email
+
+    from nodary.feature_extraction.extract import record_from_message
+    from nodary.pipeline import ingest_message
+
+    msg = make_email("vendor3@example.com", message_id="<race-dedupe@example.com>")
+    rec = record_from_message(
+        msg, direction="in", my_addrs=frozenset({"jacob@myco.com"})
+    )
+    first = ingest_message(conn, 1, 800, rec)
+    # second call with different folder/uid but same triple should return same id via pipeline guard (and index fallback)
+    second = ingest_message(conn, 2, 801, rec)
+    assert second == first
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE message_id='<race-dedupe@example.com>'"
+        ).fetchone()[0]
+        == 1
+    )

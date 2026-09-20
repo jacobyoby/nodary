@@ -14,4 +14,9 @@ from . import register_migration
 
 @register_migration(version=3, name="add_messages_sent_at_index")
 def apply(conn: sqlite3.Connection) -> None:
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
+    ).fetchone()
+    if not exists:
+        return
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_sent_at ON messages(sent_at)")

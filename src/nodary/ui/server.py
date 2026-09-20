@@ -1,7 +1,11 @@
 """Local dashboard. Binds 127.0.0.1 only; serves no external assets and makes
 no outbound requests — the page is a single self-contained HTML document.
 Served over TLS with a locally-trusted mkcert certificate when available
-(see tls.py); otherwise plain HTTP with a warning."""
+(see tls.py); otherwise plain HTTP with a warning.
+
+Wire contract: see ``schemas.py`` (TypedDicts) and
+``docs/specs/openapi.json`` (OpenAPI 3.0 derived from those types).
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from ..feature_extraction.records import HIST_HOURS, unpack_hist
 from ..scoring.tiers import TIER_LABELS, matching_tier_rule
 from ..storage import get_meta, get_psl_drift_info
 from . import tls as _tls
+from .schemas import get_openapi_spec  # noqa: F401 — re-exported for tooling
 
 # Shared projection for scored incoming rows. No subject, body, filename,
 # or full URL columns exist on these tables; keep it that way.
@@ -50,6 +55,22 @@ def _welford_std(m2: float | None, n: int) -> float | None:
     if m2 is None or n < 2:
         return None
     return math.sqrt(max(m2, 0.0) / (n - 1))
+
+
+def _api_error(code: str, message: str, status: int = 400, details: str | None = None):
+    """Unified API error envelope: {error, code, details} + HTTP status."""
+    body: dict = {"error": message, "code": code}
+    if details is not None:
+        body["details"] = details
+    return jsonify(body), status
+
+
+def _paginated(data: list, limit: int, total: int | None = None) -> dict:
+    """Wrap list responses in {data, pagination} per P0-3 contract."""
+    pag: dict = {"limit": limit, "returned": len(data)}
+    if total is not None:
+        pag["total"] = total
+    return {"data": data, "pagination": pag}
 
 
 def _sender_detail(conn: sqlite3.Connection, sender_id: int) -> dict | None:
@@ -203,7 +224,7 @@ def create_app(conn: sqlite3.Connection) -> Flask:
         acct = request.args.get("account", "all")
         acct_where, acct_params = _account_filter_sql(conn, acct)
         if acct_where is None:
-            return jsonify({"error": f"account {acct!r} not found"}), 404
+            return _api_error("account_not_found", f"account {acct!r} not found", 404)
 
         msg_where = acct_where.replace("a.id", "f.account_id")
 
@@ -302,7 +323,7 @@ def create_app(conn: sqlite3.Connection) -> Flask:
         acct = request.args.get("account", "all")
         acct_where, acct_params = _account_filter_sql(conn, acct)
         if acct_where is None:
-            return jsonify({"error": f"account {acct!r} not found"}), 404
+            return _api_error("account_not_found", f"account {acct!r} not found", 404)
         rows = conn.execute(
             f"""SELECT sk.id, f.account_id, sk.uid, sk.reason, sk.skipped_at,
                        f.name AS folder_name, a.email AS account_email
@@ -314,28 +335,45 @@ def create_app(conn: sqlite3.Connection) -> Flask:
                 LIMIT 500""",
             acct_params,
         ).fetchall()
-        return jsonify([dict(r) for r in rows])
+        data = [dict(r) for r in rows]
+        # Envelope for new clients; bare array still accepted via ?envelope=0 is not needed — UI unwraps both
+        return jsonify(_paginated(data, limit=500, total=len(data)))
 
     @app.get("/api/messages")
     def messages():
         try:
-            limit = max(1, min(int(request.args.get("limit", 200)), 1000))
+            limit_raw = request.args.get("limit", "200")
+            limit = int(limit_raw)
+            if not 1 <= limit <= 1000:
+                return _api_error(
+                    "invalid_limit", f"limit {limit} out of range 1..1000", 400
+                )
         except ValueError:
-            limit = 200
+            return _api_error(
+                "invalid_limit",
+                f"invalid limit {limit_raw!r}: must be integer 1..1000",
+                400,
+            )
         tier = request.args.get("tier")
         where, params = "", []
         if tier is not None:
             try:
-                params.append(int(tier))
+                tier_int = int(tier)
             except ValueError:
-                pass  # malformed tier filter: serve unfiltered
-            else:
-                where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
+                return _api_error(
+                    "invalid_tier", f"invalid tier {tier!r}: must be integer 0..3", 400
+                )
+            if tier_int not in (0, 1, 2, 3):
+                return _api_error(
+                    "invalid_tier", f"tier {tier_int} out of range 0..3", 400
+                )
+            params.append(tier_int)
+            where = "AND COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = ?"
 
         acct = request.args.get("account", "all")
         acct_where, acct_params = _account_filter_sql(conn, acct)
         if acct_where is None:
-            return jsonify({"error": f"account {acct!r} not found"}), 404
+            return _api_error("account_not_found", f"account {acct!r} not found", 404)
         acct_clause = acct_where.replace("a.id", "f.account_id")
 
         rows = conn.execute(
@@ -365,20 +403,26 @@ def create_app(conn: sqlite3.Connection) -> Flask:
             d.pop("_sender_msg_count", None)
             d["sender_msg_count"] = r["_sender_msg_count"]
             out.append(d)
-        return jsonify(out)
+        return jsonify(_paginated(out, limit=limit))
 
     @app.get("/api/accounts")
     def accounts():
         """List all configured accounts (id + email) for the switcher."""
         rows = conn.execute("SELECT id, email FROM accounts ORDER BY id").fetchall()
-        return jsonify([dict(r) for r in rows])
+        data = [dict(r) for r in rows]
+        return jsonify(_paginated(data, limit=len(data) or 1, total=len(data)))
 
     @app.get("/api/senders/<int:sender_id>")
     def sender(sender_id: int):
         detail = _sender_detail(conn, sender_id)
         if detail is None:
-            return jsonify({"error": "not found"}), 404
+            return _api_error("sender_not_found", "not found", 404)
         return jsonify(detail)
+
+    @app.get("/api/openapi.json")
+    def openapi():
+        """Machine-readable contract for the dashboard API (derived from schemas.py)."""
+        return jsonify(get_openapi_spec())
 
     return app
 

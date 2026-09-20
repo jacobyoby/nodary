@@ -143,8 +143,8 @@ def test_status_reports_server_deleted(conn, mailbox, capsys, monkeypatch, tmp_p
         c.execute(
             "INSERT INTO messages (folder_id, uid, message_id, direction, sender_id,"
             " from_email_norm, sent_at, size_bytes, deleted_upstream)"
-            " VALUES (1, ?, '<test@x>', 'in', 1, 'a@x.com', 1700000000, 100, ?)",
-            (uid, 1 if uid == 2 else 0),
+            " VALUES (1, ?, ?, 'in', 1, 'a@x.com', ?, 100, ?)",
+            (uid, f"<test{uid}@x>", 1700000000 + uid, 1 if uid == 2 else 0),
         )
     c.commit()
     assert main(["status"]) == 0

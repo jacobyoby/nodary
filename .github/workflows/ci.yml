@@ -48,6 +48,14 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
+      - name: Type check
+        run: uv run ty check . || echo "::warning::ty check failed or not installed — see CONSTRAINTS.md"
+
+      - name: OpenAPI drift
+        run: |
+          uv run python -c "from nodary.ui.schemas import get_openapi_spec; import json; print(json.dumps(get_openapi_spec(), indent=2))" > /tmp/openapi.json
+          diff -u docs/specs/openapi.json /tmp/openapi.json || (echo "::error::openapi.json drift — run: python -c 'from nodary.ui.schemas import get_openapi_spec; import json; print(json.dumps(get_openapi_spec(), indent=2))' > docs/specs/openapi.json"; exit 1)
+
       - name: Test
         run: uv run pytest -q
 

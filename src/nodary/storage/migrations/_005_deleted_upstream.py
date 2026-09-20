@@ -16,6 +16,11 @@ from . import register_migration
 
 @register_migration(version=5, name="add_deleted_upstream_column")
 def apply(conn: sqlite3.Connection) -> None:
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
+    ).fetchone()
+    if not exists:
+        return
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
     if "deleted_upstream" not in cols:
         conn.execute(

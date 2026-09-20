@@ -1,0 +1,658 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "nodary local dashboard",
+    "version": "0.3.1",
+    "description": "Localhost-only dashboard \u2014 binds 127.0.0.1, no external assets, no outbound requests."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8321",
+      "description": "local dashboard"
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Self-contained HTML dashboard",
+        "responses": {
+          "200": {
+            "description": "HTML page"
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Sync health and aggregate counts",
+        "parameters": [
+          {
+            "name": "account",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "all",
+              "example": "all"
+            },
+            "description": "Account id or 'all' (default). Unknown id -> 404."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "StatusResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/messages": {
+      "get": {
+        "summary": "Top scored incoming messages, one per sender",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 200
+            }
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "description": "Filter by current trust tier; malformed -> 400 invalid_tier."
+          },
+          {
+            "name": "account",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "all"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PaginatedMessages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedMessages"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid limit or tier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/accounts": {
+      "get": {
+        "summary": "List configured accounts",
+        "description": "Wrapped in {data, pagination} \u2014 wire is snake_case anomaly_score for Python parity (P2-1).",
+        "responses": {
+          "200": {
+            "description": "PaginatedAccounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedAccounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skipped": {
+      "get": {
+        "summary": "Permanently skipped messages (no content)",
+        "responses": {
+          "200": {
+            "description": "PaginatedSkipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedSkipped"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/senders/{sender_id}": {
+      "get": {
+        "summary": "Sender drill-down (baselines, histogram, recent messages)",
+        "parameters": [
+          {
+            "name": "sender_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SenderDetailResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SenderDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ScoreFeature": {
+        "type": "object",
+        "required": [
+          "feature",
+          "raw_value",
+          "weight",
+          "contribution",
+          "explanation"
+        ],
+        "properties": {
+          "feature": {
+            "type": "string"
+          },
+          "raw_value": {
+            "type": "number"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "contribution": {
+            "type": "number"
+          },
+          "explanation": {
+            "type": "string"
+          }
+        }
+      },
+      "ScoredMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "sender_id",
+          "from_email_norm",
+          "anomaly_score",
+          "tier",
+          "tier_label",
+          "features",
+          "account_id",
+          "sender_msg_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "message_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "sender_id": {
+            "type": "integer"
+          },
+          "from_email_norm": {
+            "type": "string",
+            "format": "email"
+          },
+          "from_display_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "sent_at": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Unix seconds"
+          },
+          "n_attachments": {
+            "type": "integer"
+          },
+          "n_links": {
+            "type": "integer"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "anomaly_score": {
+            "type": "number"
+          },
+          "tier": {
+            "type": "integer",
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ]
+          },
+          "trust_tier_at_scoring": {
+            "type": "integer",
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ]
+          },
+          "baseline_n": {
+            "type": "integer"
+          },
+          "engine_version": {
+            "type": "string"
+          },
+          "tier_label": {
+            "type": "string",
+            "enum": [
+              "never seen",
+              "sender new, organization known",
+              "prior one-way contact",
+              "established"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScoreFeature"
+            }
+          },
+          "account_id": {
+            "type": "integer"
+          },
+          "sender_msg_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "AccountStatusRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "auth_method",
+          "skip_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "auth_method": {
+            "type": "string",
+            "enum": [
+              "oauth2",
+              "app_password",
+              "mail_store"
+            ]
+          },
+          "last_error": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_synced_at": {
+            "type": "integer",
+            "nullable": true
+          },
+          "skip_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "required": [
+          "messages",
+          "incoming",
+          "unique_incoming",
+          "senders",
+          "accounts",
+          "total_skipped",
+          "has_errors"
+        ],
+        "properties": {
+          "messages": {
+            "type": "integer"
+          },
+          "incoming": {
+            "type": "integer"
+          },
+          "unique_incoming": {
+            "type": "integer"
+          },
+          "senders": {
+            "type": "integer"
+          },
+          "encryption": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "sqlcipher",
+              "none"
+            ]
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountStatusRow"
+            }
+          },
+          "total_skipped": {
+            "type": "integer"
+          },
+          "has_errors": {
+            "type": "boolean"
+          },
+          "psl_version": {
+            "type": "string"
+          },
+          "psl_stored_version": {
+            "type": "string"
+          },
+          "psl_drift": {
+            "type": "boolean"
+          },
+          "server_deleted_count": {
+            "type": "integer"
+          },
+          "server_deleted_by_folder": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "folder",
+                "count"
+              ],
+              "properties": {
+                "folder": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SkippedRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "uid",
+          "reason",
+          "skipped_at",
+          "folder_name",
+          "account_email"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "account_id": {
+            "type": "integer"
+          },
+          "uid": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "skipped_at": {
+            "type": "integer"
+          },
+          "folder_name": {
+            "type": "string"
+          },
+          "account_email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "AccountRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "SenderDetailResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "email_norm",
+          "domain",
+          "reg_domain",
+          "trust_tier",
+          "tier_label",
+          "tier_rule"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email_norm": {
+            "type": "string",
+            "format": "email"
+          },
+          "display_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "domain": {
+            "type": "string"
+          },
+          "reg_domain": {
+            "type": "string"
+          },
+          "is_freemail": {
+            "type": "boolean"
+          },
+          "trust_tier": {
+            "type": "integer",
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ]
+          },
+          "tier_label": {
+            "type": "string"
+          },
+          "tier_rule": {
+            "type": "string"
+          },
+          "hour_histogram": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 24,
+            "maxItems": 24
+          },
+          "recent_messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScoredMessage"
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error",
+          "code"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "details": {
+            "type": "string"
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "required": [
+          "limit",
+          "returned"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "returned": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "PaginatedMessages": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScoredMessage"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "PaginatedSkipped": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkippedRow"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "PaginatedAccounts": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountRow"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      }
+    }
+  }
+}

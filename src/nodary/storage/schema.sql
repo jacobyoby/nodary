@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
 CREATE INDEX IF NOT EXISTS idx_messages_msgid  ON messages(message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(message_id, sent_at, size_bytes) WHERE message_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS message_attachments (
   message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

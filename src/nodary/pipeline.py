@@ -59,14 +59,27 @@ def ingest_message(
     thread_id, depth = resolve_thread(conn, record)
     if record.direction == "in":
         sender_id = upsert_sender(conn, record.from_email_norm, record.sent_at)
-        msg_row_id = insert_message(
-            conn, folder_id, uid, record, sender_id, thread_id, depth
-        )
+        try:
+            msg_row_id = insert_message(
+                conn, folder_id, uid, record, sender_id, thread_id, depth
+            )
+        except sqlite3.IntegrityError:
+            # Race: unique index idx_messages_dedupe fired between check and insert
+            dup_id = _existing_duplicate(conn, record)
+            if dup_id is not None:
+                return dup_id
+            raise
         _apply_incoming(conn, msg_row_id, record, sender_id, thread_id, depth)
     else:
-        msg_row_id = insert_message(
-            conn, folder_id, uid, record, None, thread_id, depth
-        )
+        try:
+            msg_row_id = insert_message(
+                conn, folder_id, uid, record, None, thread_id, depth
+            )
+        except sqlite3.IntegrityError:
+            dup_id = _existing_duplicate(conn, record)
+            if dup_id is not None:
+                return dup_id
+            raise
         recipient_ids = []
         for addr in dict.fromkeys(record.recipient_addrs_norm):
             sid = upsert_sender(conn, addr, record.sent_at)

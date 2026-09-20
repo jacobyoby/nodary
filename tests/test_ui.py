@@ -21,6 +21,13 @@ def client(conn):
     return app.test_client()
 
 
+def _unwrap(payload):
+    """Unwrap paginated envelope {data, pagination} or return bare array."""
+    if isinstance(payload, dict) and "data" in payload and "pagination" in payload:
+        return payload["data"]
+    return payload
+
+
 def test_index_served_self_contained(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -54,7 +61,7 @@ def test_status_counts(client, mailbox):
 
 def test_messages_include_scores_and_current_tier(client, mailbox):
     mailbox.establish_contact("dana@acme.com", display="Dana Ito")
-    msgs = client.get("/api/messages").get_json()
+    msgs = _unwrap(client.get("/api/messages").get_json())
     assert msgs
     m = msgs[0]
     assert {
@@ -72,15 +79,15 @@ def test_messages_include_scores_and_current_tier(client, mailbox):
 def test_messages_tier_filter(client, mailbox):
     mailbox.establish_contact("dana@acme.com")  # tier 3
     mailbox.deliver(make_email("cold@stranger.net"))  # tier 0
-    tiers = {m["tier"] for m in client.get("/api/messages?tier=0").get_json()}
+    tiers = {m["tier"] for m in _unwrap(client.get("/api/messages?tier=0").get_json())}
     assert tiers == {0}
 
 
 def test_messages_bad_params_fall_back_to_defaults(client, mailbox):
     mailbox.deliver(make_email("a@example.com"))
-    assert client.get("/api/messages?limit=abc").status_code == 200
-    assert client.get("/api/messages?limit=-5").status_code == 200
-    assert client.get("/api/messages?tier=zzz").status_code == 200
+    assert client.get("/api/messages?limit=abc").status_code == 400
+    assert client.get("/api/messages?limit=-5").status_code == 400
+    assert client.get("/api/messages?tier=zzz").status_code == 400
 
 
 def test_sender_endpoint(client, mailbox):
@@ -164,7 +171,7 @@ def test_sender_detail_privacy_on_messages_list(client, mailbox):
             attachments=[("secret-invoice.pdf", "application/pdf", b"%PDF")],
         )
     )
-    blob = json.dumps(client.get("/api/messages").get_json())
+    blob = json.dumps(_unwrap(client.get("/api/messages").get_json()))
     assert "secret-invoice.pdf" not in blob
     assert "https://phish.example" not in blob
     assert "/path?q=1" not in blob
@@ -338,7 +345,7 @@ def test_skipped_endpoint_returns_rows(client, conn):
         (now,),
     )
     conn.commit()
-    rows = client.get("/api/skipped").get_json()
+    rows = _unwrap(client.get("/api/skipped").get_json())
     assert len(rows) == 1
     r = rows[0]
     assert r["uid"] == 200
@@ -351,7 +358,7 @@ def test_skipped_endpoint_returns_rows(client, conn):
 
 
 def test_skipped_endpoint_empty(client):
-    rows = client.get("/api/skipped").get_json()
+    rows = _unwrap(client.get("/api/skipped").get_json())
     assert rows == []
 
 
@@ -381,7 +388,7 @@ def test_status_skips_and_server_deleted_stay_separate(client, conn, mailbox):
     assert r["total_skipped"] == 1
     assert r["server_deleted_count"] == 1
     assert r["accounts"][0]["skip_count"] == 1
-    rows = client.get("/api/skipped").get_json()
+    rows = _unwrap(client.get("/api/skipped").get_json())
     assert [row["uid"] for row in rows] == [900]
     blob = json.dumps({"status": r, "skipped": rows})
     assert "gone@example.com" not in blob
@@ -406,9 +413,9 @@ def test_skipped_endpoint_account_filter(client, conn):
         (now,),
     )
     conn.commit()
-    only1 = client.get("/api/skipped?account=1").get_json()
-    only2 = client.get("/api/skipped?account=2").get_json()
-    both = client.get("/api/skipped?account=all").get_json()
+    only1 = _unwrap(client.get("/api/skipped?account=1").get_json())
+    only2 = _unwrap(client.get("/api/skipped?account=2").get_json())
+    both = _unwrap(client.get("/api/skipped?account=all").get_json())
     assert {r["uid"] for r in only1} == {200}
     assert {r["uid"] for r in only2} == {201}
     assert {r["uid"] for r in both} == {200, 201}
@@ -498,12 +505,12 @@ def test_messages_account_filter_returns_only_that_account(client, conn, mailbox
     _add_second_account(conn)
     _deliver_into_folder(conn, 3, 1, "other@x.com")  # account 2, folder 3
 
-    msgs_acct1 = client.get("/api/messages?account=1").get_json()
+    msgs_acct1 = _unwrap(client.get("/api/messages?account=1").get_json())
     addrs1 = {m["from_email_norm"] for m in msgs_acct1}
     assert "cold@stranger.net" in addrs1
     assert "other@x.com" not in addrs1
 
-    msgs_acct2 = client.get("/api/messages?account=2").get_json()
+    msgs_acct2 = _unwrap(client.get("/api/messages?account=2").get_json())
     addrs2 = {m["from_email_norm"] for m in msgs_acct2}
     assert "other@x.com" in addrs2
     assert "cold@stranger.net" not in addrs2
@@ -514,7 +521,7 @@ def test_messages_account_all_returns_all_accounts(client, conn, mailbox):
     _add_second_account(conn)
     _deliver_into_folder(conn, 3, 1, "other@x.com")
 
-    msgs = client.get("/api/messages?account=all").get_json()
+    msgs = _unwrap(client.get("/api/messages?account=all").get_json())
     addrs = {m["from_email_norm"] for m in msgs}
     assert "cold@stranger.net" in addrs
     assert "other@x.com" in addrs
@@ -527,12 +534,12 @@ def test_messages_account_filter_composes_with_tier(client, conn, mailbox):
     _deliver_into_folder(conn, 3, 1, "other@x.com")  # tier 0, account 2
 
     # tier 0 + account 1: only cold@stranger.net
-    msgs = client.get("/api/messages?account=1&tier=0").get_json()
+    msgs = _unwrap(client.get("/api/messages?account=1&tier=0").get_json())
     addrs = {m["from_email_norm"] for m in msgs}
     assert addrs == {"cold@stranger.net"}
 
     # tier 0 + account 2: only other@x.com
-    msgs2 = client.get("/api/messages?account=2&tier=0").get_json()
+    msgs2 = _unwrap(client.get("/api/messages?account=2&tier=0").get_json())
     addrs2 = {m["from_email_norm"] for m in msgs2}
     assert addrs2 == {"other@x.com"}
 
@@ -583,7 +590,7 @@ def test_status_account_not_found(client, conn):
 
 def test_accounts_endpoint_lists_all(client, conn):
     _add_second_account(conn)
-    accts = client.get("/api/accounts").get_json()
+    accts = _unwrap(client.get("/api/accounts").get_json())
     emails = {a["email"] for a in accts}
     assert emails == {"jacob@myco.com", "alice@other.com"}
     assert all("id" in a for a in accts)
@@ -607,7 +614,7 @@ def test_sender_collapse_one_row_per_sender(client, mailbox):
     mailbox.deliver(make_email("repeat@sender.com", when=t2))
     mailbox.deliver(make_email("other@elsewhere.com"))
 
-    msgs = client.get("/api/messages").get_json()
+    msgs = _unwrap(client.get("/api/messages").get_json())
     addrs = [m["from_email_norm"] for m in msgs]
     assert len(addrs) == 2
     assert sorted(addrs) == ["other@elsewhere.com", "repeat@sender.com"]
@@ -621,7 +628,7 @@ def test_sender_collapse_sender_msg_count(client, mailbox):
     mailbox.deliver(make_email("repeat@sender.com", when=t2))
     mailbox.deliver(make_email("solo@other.com"))
 
-    msgs = client.get("/api/messages").get_json()
+    msgs = _unwrap(client.get("/api/messages").get_json())
     by_addr = {m["from_email_norm"]: m for m in msgs}
     assert by_addr["repeat@sender.com"]["sender_msg_count"] == 2
     assert by_addr["solo@other.com"]["sender_msg_count"] == 1
@@ -634,7 +641,7 @@ def test_sender_collapse_rn_not_in_response(client, mailbox):
     mailbox.deliver(make_email("repeat@sender.com", when=t1))
     mailbox.deliver(make_email("repeat@sender.com", when=t2))
 
-    msgs = client.get("/api/messages").get_json()
+    msgs = _unwrap(client.get("/api/messages").get_json())
     for m in msgs:
         assert "_rn" not in m
         assert "_sender_msg_count" not in m
@@ -647,12 +654,12 @@ def test_sender_collapse_tier_filter(client, mailbox):
     mailbox.deliver(make_email("cold@stranger.net"))  # tier 0
 
     # tier 0 should return only cold@stranger.net (one row)
-    msgs = client.get("/api/messages?tier=0").get_json()
+    msgs = _unwrap(client.get("/api/messages?tier=0").get_json())
     addrs = {m["from_email_norm"] for m in msgs}
     assert addrs == {"cold@stranger.net"}
 
     # tier 3 should return only dana@acme.com (collapsed to one row)
-    msgs3 = client.get("/api/messages?tier=3").get_json()
+    msgs3 = _unwrap(client.get("/api/messages?tier=3").get_json())
     addrs3 = {m["from_email_norm"] for m in msgs3}
     assert addrs3 == {"dana@acme.com"}
     assert msgs3[0]["sender_msg_count"] >= 2

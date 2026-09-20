@@ -261,7 +261,15 @@
   </div>
 </section>
 <script>
-const esc = s => (s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => (s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function unwrap(payload) { return payload && payload.data !== undefined ? payload.data : payload; }
+async function fetchJson(url) {
+  const r = await fetch(url);
+  const j = await r.json();
+  console.debug("[nodary fetch]", url, r.status, j && j.pagination ? `pagination=${JSON.stringify(j.pagination)}` : `${Array.isArray(j) ? j.length : typeof j}`);
+  if (!r.ok) console.warn("[nodary fetch error]", url, r.status, j);
+  return j;
+}
 
 const TIER_SHORT = {0: "never seen", 1: "org known", 2: "one-way", 3: "established"};
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -337,7 +345,7 @@ function fmtSyncTime(ts) {
 let currentAccount = "all";
 
 async function loadAccounts() {
-  const accts = await (await fetch("/api/accounts")).json();
+  const accts = unwrap(await fetchJson("/api/accounts"));
   const sel = document.getElementById("acct-select");
   // keep "all" as first option, add per-account options
   accts.forEach(a => {
@@ -354,7 +362,7 @@ async function loadAccounts() {
 }
 
 async function loadStatus() {
-  const s = await (await fetch(`/api/status?account=${currentAccount}`)).json();
+  const s = await fetchJson(`/api/status?account=${currentAccount}`);
   if (s.error) return;  // account not found — ignore silently
   const hidden = s.incoming - (s.unique_incoming || s.incoming);
   const hiddenNote = hidden > 0 ? ` · ${hidden} collapsed` : "";
@@ -417,7 +425,9 @@ async function loadStatus() {
 async function loadMessages(tier) {
   const q = tier === "" ? "" : `&tier=${tier}`;
   const aq = currentAccount === "all" ? "" : `&account=${currentAccount}`;
-  const msgs = await (await fetch(`/api/messages?limit=300${q}${aq}`)).json();
+  const payload = await fetchJson(`/api/messages?limit=300${q}${aq}`);
+  if (payload && payload.code) { document.getElementById("list").innerHTML = `<div class="empty">error: ${esc(payload.error)} (${esc(payload.code)})</div>`; return; }
+  const msgs = unwrap(payload);
   const list = document.getElementById("list");
   if (!msgs.length) { list.innerHTML = '<div class="empty">no scored messages — run <code>nodary sync</code></div>'; return; }
   list.innerHTML = msgs.map(m => {
@@ -555,7 +565,7 @@ async function openSkipList() {
   const body = document.getElementById("skip-body");
   body.innerHTML = '<div class="skip-empty">loading…</div>';
   try {
-    const rows = await (await fetch(`/api/skipped?account=${currentAccount}`)).json();
+    const rows = unwrap(await fetchJson(`/api/skipped?account=${currentAccount}`));
     if (!rows.length) {
       body.innerHTML = '<div class="skip-empty">no skipped messages</div>';
       return;

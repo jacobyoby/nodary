@@ -238,7 +238,8 @@ def test_sync_persists_structure_not_content(tmp_path):
 
     app = create_app(conn)
     client = app.test_client()
-    messages = client.get("/api/messages").get_json()
+    _resp = client.get("/api/messages").get_json()
+    messages = _resp["data"] if isinstance(_resp, dict) and "data" in _resp else _resp
     assert messages
     payload = {
         "messages": messages,
