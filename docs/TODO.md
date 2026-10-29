@@ -11,8 +11,8 @@ work; `CHANGELOG.md` remains the release-history source of truth.
       structure parsing without persisting body text, subjects, filenames, or
       full URLs. Why: keeps the behavioral profile privacy-preserving.
 - [x] Sender/domain profiles, trust tiers 0-3, and deterministic scoring engine
-      v1.0.0 with stored feature explanations. Why: scores are recomputable and
-      inspectable.
+      v1.1.0 (`ENGINE_VERSION`) with stored feature explanations. Why: scores
+      are recomputable and inspectable.
 - [x] `nodary rebuild` replay path. Why: profiles, tiers, and scores can be
       regenerated from fact tables after backfills or schema/profile changes.
 - [x] SQLCipher-at-rest support keyed from the OS keychain, plus visible

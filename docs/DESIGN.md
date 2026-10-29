@@ -1,6 +1,6 @@
 # Nodary Design
 
-Status: **current implementation, v0.3.0**. The database schema in
+Status: **current implementation, v0.3.1**. The database schema in
 `src/nodary/storage/schema.sql` is authoritative for table/column details.
 
 Nodary is a local-first, deterministic behavioral-analysis tool for BEC and

@@ -2,10 +2,11 @@
 
 ## Ground rules (these are the product)
 
-1. **Nothing leaves the machine.** No telemetry, no cloud calls, no external
-   scoring APIs, no "anonymous" stats. The only network connection this
-   codebase may open is the read-only IMAP session (and Flask bound to
-   127.0.0.1). PRs adding any other outbound traffic will be rejected.
+1. **Nothing leaves the machine.** No telemetry, no cloud scoring APIs, no
+   "anonymous" stats. Allowed network use is the read-only IMAP session,
+   optional OAuth2 token refresh to the allowlisted Google/Microsoft token
+   endpoints in `src/nodary/auth/oauth2.py`, and Flask bound to 127.0.0.1.
+   PRs adding any other outbound traffic will be rejected.
 2. **No new persisted content.** Body text, subjects, filenames, and full
    URLs are never written to the database. If a feature needs new data,
    derive the minimal structural value (count, extension, registrable

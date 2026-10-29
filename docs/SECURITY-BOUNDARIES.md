@@ -5,12 +5,12 @@ Local-first, read-only analysis. This document states the isolation invariants t
 ## Trust boundary
 
 - **Process:** `nodary sync` and `nodary ui` run as the local user. Dashboard binds `127.0.0.1` only (never `0.0.0.0`). No cloud scoring, no telemetry.
-- **Network:** No outbound requests after install. `tldextract` uses vendored PSL snapshot (`suffix_list_urls=()`), confusables from `data/uts39/confusables.txt`; `auth/oauth2.py` allowlists only Google + Microsoft token endpoints.
+- **Network:** After install, outbound traffic is limited to read-only IMAP and the allowlisted Google/Microsoft OAuth2 token endpoints in `auth/oauth2.py`. `tldextract` uses a vendored PSL snapshot (`suffix_list_urls=()`); confusables come from `data/uts39/confusables.txt`.
 - **TLS:** `ui/tls.py` generates mkcert local CA cert; fallback plain HTTP warns. No secrets in DB.
 
 ## Data projection allowlist
 
-`ui/server.py:_SCORED_MESSAGE_COLS` is the ONLY projection for scored rows. It explicitly excludes subject, body, filenames, full URLs. The dashboard is self-contained HTML (`src/nodary/ui/templates/index.html` — 605 lines, inline style+script, `tests/test_ui.py` asserts no `http://` `src=`).
+`ui/server.py:_SCORED_MESSAGE_COLS` is the ONLY projection for scored rows. It explicitly excludes subject, body, filenames, full URLs. The dashboard is self-contained HTML (`src/nodary/ui/templates/index.html` — inline style+script; `tests/test_ui.py` asserts no `http://` `src=`).
 
 ```sql
 _SCORED_MESSAGE_COLS = "m.id, m.message_id, m.sender_id, m.from_email_norm,
