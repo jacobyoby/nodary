@@ -105,10 +105,10 @@ stored score; bump it whenever a feature, weight, or threshold changes.
   produces clear errors on encryption mode mismatches. The archive is as
   sensitive as the live database — IMAP secrets are never included and must
   be re-entered on the target machine via `nodary set-secret`.
-- README donate Payment Link for Jacobrakai Foundation
-  (Donate / Support Jacobrakai Foundation — JACOBRAKAI FOUNDATION 501(c)(3)),
+- README donate Payment Link for JACOBRAKAI FOUNDATION
+  (Donate / Support JACOBRAKAI FOUNDATION — JACOBRAKAI FOUNDATION 501(c)(3)),
   plus `.github/FUNDING.yml` custom Stripe URL for the GitHub Sponsor button.
-- README notes Jacobrakai Foundation 501(c)(3) status (EIN 33-3382083) and
+- README notes JACOBRAKAI FOUNDATION 501(c)(3) status (EIN 33-3382083) and
   IRS Letter 947 dated September 3, 2026.
 - Privacy-invariant regression tests (`tests/test_privacy_invariants.py`) and
   a `SECURITY.md` threat-model stub. After a synthetic sync with rich

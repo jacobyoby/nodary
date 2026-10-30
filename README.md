@@ -238,6 +238,7 @@ Recompute all derived profiles, tiers, and scores from locally stored facts:
 
 ```sh
 uv run nodary rebuild
+uv run nodary status
 ```
 
 Run `nodary rebuild` after a `tldextract` upgrade to clear PSL drift. The
@@ -397,11 +398,11 @@ uv run nodary set-secret <account_id>
   installations.
 - Nodary never sends mail and never modifies mailbox contents.
 
-## Jacobrakai Foundation
+## JACOBRAKAI FOUNDATION
 
 JACOBRAKAI FOUNDATION (EIN 33-3382083) is an IRC 501(c)(3) public charity
 under 170(b)(1)(A)(vi), effective February 11, 2025. Contributions are
 deductible. IRS Letter 947 dated September 3, 2026.
 
-[Donate / Support Jacobrakai Foundation](https://donate.stripe.com/eVq4gy97DanS9h60phfrW00)
+[Donate / Support JACOBRAKAI FOUNDATION](https://donate.stripe.com/eVq4gy97DanS9h60phfrW00)
 — JACOBRAKAI FOUNDATION 501(c)(3)

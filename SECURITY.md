@@ -30,10 +30,11 @@ verdict that a message is malicious.
 - Bind the dashboard off `127.0.0.1`, or load external dashboard assets.
 - Publish red-team or exploit writeups against third-party mail providers.
 
-The only network connection the codebase may open is the read-only IMAP
-session (plus Flask bound to localhost). Public Suffix List data, the
-freemail list, and confusables are vendored; they are not fetched at
-runtime.
+Allowed network use is the read-only IMAP session, optional OAuth2 token
+refresh to the allowlisted Google/Microsoft token endpoints in
+`src/nodary/auth/oauth2.py`, and Flask bound to localhost. Public Suffix
+List data, the freemail list, and confusables are vendored; they are not
+fetched at runtime.
 
 ## Privacy invariants
 
@@ -82,4 +83,5 @@ and `tests/test_ui.py`.
 
 This is an offline local app. If Nodary persists forbidden content, writes
 credentials into the database, or opens outbound traffic beyond read-only
-IMAP, open a GitHub issue against this repository.
+IMAP and the allowlisted OAuth2 token endpoints, open a GitHub issue against
+this repository.
