@@ -49,9 +49,12 @@ class Transport(Protocol):
 class ImapTransport:
     def __init__(self, host: str, port: int = 993):
         import imapclient
+        from imapclient.exceptions import LoginError
 
         self._imapclient = imapclient
         self.client = imapclient.IMAPClient(host, port=port, ssl=True)
+        # The server-rejected-login error, for callers that handle it.
+        self.login_error = LoginError
 
     def login_password(self, user: str, password: str) -> None:
         self.client.login(user, password)

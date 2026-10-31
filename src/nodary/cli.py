@@ -265,6 +265,14 @@ def cmd_sync(args) -> int:
                     transport.login_password(acct["email"], secret)
                 stats = sync_account(conn, transport, acct["id"], **sync_kwargs)
             except Exception as exc:
+                # A rejected password has no refresh path: record it and move
+                # on so one account's bad credential cannot stop the others.
+                if acct["auth_method"] != "oauth2" and isinstance(
+                    exc, transport.login_error
+                ):
+                    _account_error(conn, acct, f"login failed: {exc}")
+                    any_failed = True
+                    continue
                 # Handle auth failures (login-time or mid-session) for
                 # OAuth2 accounts. Non-auth or non-OAuth2 errors propagate.
                 is_auth_expired = isinstance(exc, _AuthExpired)

@@ -298,3 +298,43 @@ def test_needs_me_lists_scored_incoming(env, monkeypatch, request, capsys):
     assert "ada@example.com" in senders
     assert all("subject" not in r for r in rows)
     assert main(["needs-me", "--days", "0"]) == 2
+
+
+def test_sync_continues_after_password_login_rejected(
+    env, monkeypatch, request, capsys
+):
+    """A rejected app-password login is recorded and later accounts still sync."""
+    import imapclient
+    from imapclient.exceptions import LoginError
+
+    class RejectingImapClient:
+        def __init__(self, host, port=993, ssl=True):
+            pass
+
+        def login(self, user, password):
+            raise LoginError("b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'")
+
+        def logout(self):
+            pass
+
+    mail_store = request.getfixturevalue("store")
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(mail_store.root))
+    monkeypatch.setattr(imapclient, "IMAPClient", RejectingImapClient)
+    assert _add_account(monkeypatch, "rejected@example.com") == 0
+    assert _add_account(monkeypatch, "jacob@example.com") == 0
+    assert main(["set-source", "2", "mail-store"]) == 0
+    monkeypatch.setattr("nodary.cli.get_account_secret", lambda _id: "wrong")
+
+    assert main(["sync"]) == 1
+    captured = capsys.readouterr()
+    assert "account #1 (rejected@example.com): login failed:" in captured.err
+    assert "2 new messages" in captured.out
+    from nodary.cli import _open
+
+    conn = _open()
+    by_id = {
+        r["id"]: r["last_error"]
+        for r in conn.execute("SELECT id, last_error FROM accounts")
+    }
+    assert "Invalid credentials" in by_id[1]
+    assert by_id[2] is None
