@@ -8,7 +8,16 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Added
+- **`nodary needs-me`:** prints, as JSON, recent incoming mail from Tier 3
+  senders plus any message at or above `--min-score`, leaving out the
+  user's own addresses and unflagged no-reply senders. Same privacy
+  projection as the dashboard. See ADR 0003.
+
 ### Fixed
+- **Rejected app-password login:** `nodary sync` now records the server's
+  rejection as the account's `last_error` and goes on to the next account,
+  instead of stopping the whole sync. OAuth2 accounts keep their refresh path.
 - **Dashboard last_error contract:** account-level sync failures (missing
   credential, unclaimed mail-store, OAuth2 auth failure) now persist
   `accounts.last_error` so `/api/status` and the status strip match the CLI.
