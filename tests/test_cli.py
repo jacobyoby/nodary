@@ -279,3 +279,22 @@ def test_sync_fails_cleanly_on_missing_layout(env, monkeypatch, capsys, tmp_path
     assert main(["sync"]) == 1
     err = capsys.readouterr().err
     assert "does not exist" in err.lower()
+
+
+def test_needs_me_lists_scored_incoming(env, monkeypatch, request, capsys):
+    import json
+
+    mail_store = request.getfixturevalue("store")
+
+    monkeypatch.setenv("NODARY_MAIL_STORE", str(mail_store.root))
+    assert _add_account(monkeypatch) == 0
+    main(["set-source", "1", "mail-store"])
+    assert main(["sync"]) == 0
+    capsys.readouterr()
+    # min-score 0 admits every scored incoming message regardless of tier
+    assert main(["needs-me", "--days", "100000", "--min-score", "0"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    senders = {r["from_email_norm"] for r in rows}
+    assert "ada@example.com" in senders
+    assert all("subject" not in r for r in rows)
+    assert main(["needs-me", "--days", "0"]) == 2

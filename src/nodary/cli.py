@@ -1,4 +1,4 @@
-"""nodary CLI: add-account, set-secret, set-source, sync, rebuild, ui."""
+"""nodary CLI: add-account, set-secret, set-source, sync, rebuild, ui, needs-me."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import getpass
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -674,6 +675,55 @@ def cmd_ui(args) -> int:
     return 0
 
 
+_NO_REPLY = re.compile(
+    r"^(no[-_.]?reply|do-?not-?reply|mailer-daemon|bounces?)([-_.+][^@]*)?@"
+)
+
+
+def cmd_needs_me(args) -> int:
+    """Print, as JSON, recent incoming mail that needs the user: every message
+    from an established (Tier 3) sender, plus any message scoring at or above
+    --min-score whatever the sender's tier. Mail from the user's own addresses,
+    and unflagged mail from no-reply addresses, is left out. Same projection as the dashboard: no subject or body."""
+    import json
+
+    from .ui.server import _SCORED_MESSAGE_COLS, _scored_payload
+
+    if args.days < 1:
+        print(f"--days must be at least 1, got {args.days}", file=sys.stderr)
+        return 2
+    if not 0 <= args.min_score <= 100:
+        print(f"--min-score must be 0-100, got {args.min_score}", file=sys.stderr)
+        return 2
+    conn = _open()
+    since = int(time.time()) - args.days * 86400
+    rows = conn.execute(
+        f"""SELECT {_SCORED_MESSAGE_COLS}, f.account_id
+            FROM messages m
+            JOIN message_scores sc ON sc.message_id = m.id
+            LEFT JOIN sender_profiles p ON p.sender_id = m.sender_id
+            JOIN folders f ON f.id = m.folder_id
+            WHERE m.direction = 'in' AND m.deleted_upstream = 0
+              AND m.sent_at >= ?
+              AND m.from_email_norm NOT IN (SELECT email_norm FROM user_identities)
+              AND (COALESCE(p.trust_tier, sc.trust_tier_at_scoring) = 3
+                   OR sc.anomaly_score >= ?)
+            ORDER BY m.sent_at DESC""",
+        (since, args.min_score),
+    ).fetchall()
+    # A no-reply address cannot be a correspondent, so its Tier 3 alone does
+    # not admit it; a high score still does.
+    rows = [
+        r
+        for r in rows
+        if r["anomaly_score"] >= args.min_score
+        or not _NO_REPLY.match(r["from_email_norm"])
+    ]
+    json.dump([_scored_payload(conn, r) for r in rows], sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="nodary",
@@ -779,6 +829,19 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="overwrite an existing database"
     )
     ip.set_defaults(fn=cmd_import_profile)
+
+    nm = sub.add_parser(
+        "needs-me",
+        help="print recent mail from Tier 3 senders or above a score, as JSON",
+    )
+    nm.add_argument("--days", type=int, default=30, help="look back N days")
+    nm.add_argument(
+        "--min-score",
+        type=float,
+        default=25.0,
+        help="also include any message scoring at least this (0-100)",
+    )
+    nm.set_defaults(fn=cmd_needs_me)
 
     args = p.parse_args(argv)
     return args.fn(args)

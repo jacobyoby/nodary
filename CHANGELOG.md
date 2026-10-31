@@ -8,6 +8,12 @@ stored score; bump it whenever a feature, weight, or threshold changes.
 
 ## [Unreleased]
 
+### Added
+- **`nodary needs-me`:** prints, as JSON, recent incoming mail from Tier 3
+  senders plus any message at or above `--min-score`, leaving out the
+  user's own addresses and unflagged no-reply senders. Same privacy
+  projection as the dashboard. See ADR 0003.
+
 ### Fixed
 - **Dashboard last_error contract:** account-level sync failures (missing
   credential, unclaimed mail-store, OAuth2 auth failure) now persist
